@@ -16,6 +16,7 @@ from azdora.notizie import (
     ordina,
     parla_di,
     recenti,
+    riguarda,
     senza_doppioni,
     url_google_news,
 )
@@ -89,6 +90,12 @@ def test_parla_di_parola_intera():
     )
 
 
+def test_doppioni_con_apostrofi_diversi():
+    a = Notizia("Turismo, l’offerta formativa a Cervia", "https://a", "x")
+    b = Notizia("Turismo, l'offerta formativa a Cervia", "https://b", "y")
+    assert senza_doppioni([a, b]) == [a]
+
+
 def test_recenti_doppioni_e_ordine():
     vecchia = Notizia("Vecchia", "https://a", "x", ADESSO - timedelta(days=3))
     nuova = Notizia("Nuova", "https://b", "x", ADESSO - timedelta(hours=1))
@@ -148,10 +155,10 @@ def _finti_giornali():
 def test_fonti_da_cesena_a_pesaro():
     from azdora.notizie import AREA_DELLA_FONTE
 
-    assert set(AREA_DELLA_FONTE.values()) == {"Cesena", "Rimini", "Pesaro"}
+    assert set(AREA_DELLA_FONTE.values()) == {"Cervia", "Cesena", "Rimini", "Pesaro"}
     assert len({f.url for f in FONTI_RIVIERA}) == len(FONTI_RIVIERA)
     # I giornali che rifiutano i programmi automatici passano da Google News.
-    bloccati = {"Rimini Today", "Cesena Today", "NewsRimini"}
+    bloccati = {"Rimini Today", "Cesena Today", "NewsRimini", "Google News"}
     for fonte in FONTI_RIVIERA:
         assert fonte.url.startswith("https://news.google.com/") == (fonte.nome in bloccati)
 
@@ -199,9 +206,9 @@ def test_lettore_fuori_riviera_usa_solo_google():
         return_value=httpx.Response(200, content=_feed("rss_googlenews.xml"))
     )
     with httpx.Client() as http:
-        notizie = LettoreNotizie(http).notizie_per("Bologna", *BOLOGNA, ADESSO)
-    assert not locale.called
-    assert notizie
+        notizie = LettoreNotizie(http).notizie_per("Riccione", *BOLOGNA, ADESSO)
+    assert not locale.called  # lontano dalla Riviera: niente giornali locali
+    assert notizie and all(riguarda(n, "Riccione") for n in notizie)
 
 
 @respx.mock
@@ -305,3 +312,52 @@ def test_del_giorno_divide_tra_cesena_rimini_e_pesaro():
     assert len(sul_comune) <= 4
     aree = {AREA_DELLA_FONTE.get(n.fonte) for n in notizie if not parla_di(n, "Riccione")}
     assert {"Cesena", "Pesaro"} <= aree
+
+
+@respx.mock
+def test_giornali_di_ravenna_solo_sul_litorale():
+    from azdora.notizie import FONTI_RIVIERA
+
+    carlino_ravenna = next(f for f in FONTI_RIVIERA if f.nome == "il Resto del Carlino Ravenna")
+    feed = b"""<rss><channel>
+      <item><title>Ravenna, nuovo parcheggio in centro</title><link>https://a/1</link></item>
+      <item><title>Milano Marittima, apre la pineta</title><link>https://a/2</link></item>
+      <item><title>Cesenatico, il presepe della marineria</title><link>https://a/3</link></item>
+    </channel></rss>"""
+    respx.get(carlino_ravenna.url).mock(return_value=httpx.Response(200, content=feed))
+    with httpx.Client() as http:
+        notizie = LettoreNotizie(http, [carlino_ravenna])._scarica(carlino_ravenna)
+    assert [n.titolo.split(",")[0] for n in notizie] == ["Milano Marittima", "Cesenatico"]
+    assert all(n.area == "Cervia" for n in notizie)
+
+
+def test_cervia_e_mima_sono_in_zona():
+    from azdora.notizie import in_zona
+
+    assert in_zona(44.274, 12.352)  # Milano Marittima
+    assert in_zona(44.263, 12.349)  # Cervia
+
+
+def test_riguarda_e_spazzatura_aggregatori():
+    from azdora.notizie import riguarda
+
+    voce = Notizia("Libri gratis alle primarie", "https://a", "La Voce di Cesenatico")
+    assert riguarda(voce, "Cesenatico") and not parla_di(voce, "Cesenatico")
+    assert e_spazzatura(Notizia("Sos lavoratori nel ricettivo", "https://a", "Zazoom Social News"))
+    assert e_spazzatura(Notizia("Pinocchio al Tiberio", "https://a", "Howl.Link"))
+
+
+@respx.mock
+def test_ricerca_google_tiene_solo_il_posto_cercato():
+    feed = b"""<rss><channel>
+      <item><title>Milano Marittima, apre la pineta - Il Resto del Carlino</title>
+        <link>https://a/1</link><source>Il Resto del Carlino</source></item>
+      <item><title>Rimini, Pinocchio al teatro - Altro</title>
+        <link>https://a/2</link><source>Altro</source></item>
+    </channel></rss>"""
+    respx.get(url__startswith="https://news.google.com/").mock(
+        return_value=httpx.Response(200, content=feed)
+    )
+    with httpx.Client() as http:
+        notizie = LettoreNotizie(http, []).notizie_per("Milano Marittima", 45.46, 9.19, ADESSO)
+    assert [n.link for n in notizie] == ["https://a/1"]

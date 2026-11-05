@@ -461,3 +461,19 @@ def test_fuori_riviera_niente_giornali_locali(bot, notizie, luoghi):
     bot.gestisci_update(messaggio("/notizie"))
     assert notizie.richieste_giorno == []
     assert notizie.richieste == ["Bologna"]
+
+
+def test_notizie_di_una_frazione_senza_notizie_usano_il_comune(bot, messaggero, notizie, luoghi):
+    from azdora.config import Localita
+
+    luoghi.cerca = lambda nome: Localita("geo:mm", "Milano Marittima", 44.27, 12.35, 44.27, 12.35)
+
+    class SoloCervia(type(notizie)):
+        def notizie_per(self, comune, lat, lon, adesso):
+            self.richieste.append(comune)
+            return [notizia(1)] if comune == "Cervia" else []
+
+    bot.notizie = SoloCervia()
+    bot.gestisci_update(messaggio("/notizie mima"))
+    assert bot.notizie.richieste == ["Milano Marittima", "Cervia"]
+    assert "Cervia (per Milano Marittima)" in messaggero.ultimo

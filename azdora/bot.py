@@ -124,6 +124,14 @@ NOTIZIE_A_RICHIESTA = 10  # con /notizie se ne vedono di più che negli avvisi a
 RICORDO_NOTIZIE_S = 3 * 24 * 3600
 RICORDO_ZONA_S = 30 * 24 * 3600
 ORA_DELLA_SERA = 20  # rifiuti e riepilogo della sera
+# Come li chiamano tutti in Romagna → il nome vero, per cercarli.
+SOPRANNOMI = {
+    "mima": "Milano Marittima",
+    "mi.ma": "Milano Marittima",
+    "pmm": "Milano Marittima",
+    "rimini nord": "Viserba",
+    "sammarino": "San Marino",
+}
 
 
 @dataclass(frozen=True)
@@ -344,7 +352,7 @@ class Azdora:
 
     def _localita_richiesta(self, chat: Chat, comando: Comando) -> Localita | None:
         """Il posto scritto (Riccione, "rn", qualsiasi comune) o, se manca, dove sei adesso."""
-        testo = comando.testo_argomenti
+        testo = SOPRANNOMI.get(comando.testo_argomenti.strip().lower(), comando.testo_argomenti)
         if not testo.strip():
             zona = self._zona_della_chat(chat)
             if zona.da_posizione:
@@ -546,11 +554,16 @@ class Azdora:
                 self.messaggero.invia_messaggio(chat.id, testo)
                 return
         trovate = self.notizie.notizie_per(comune, lat, lon, adesso)
+        titolo_comune = comune
+        if not trovate and (padre := modulo_notizie.FRAZIONI.get(comune.lower())):
+            # Di Milano Marittima oggi non si parla? Allora le notizie di Cervia.
+            trovate = self.notizie.notizie_per(padre, lat, lon, adesso)
+            titolo_comune = f"{padre} (per {comune})"
         if not trovate:
             self.messaggero.invia_messaggio(chat.id, messaggi.nessuna_notizia(comune))
             return
         testo = modulo_notizie.formatta(
-            trovate[:NOTIZIE_A_RICHIESTA], messaggi.titolo_notizie(comune, nuove=False)
+            trovate[:NOTIZIE_A_RICHIESTA], messaggi.titolo_notizie(titolo_comune, nuove=False)
         )
         self.messaggero.invia_messaggio(chat.id, testo)
 

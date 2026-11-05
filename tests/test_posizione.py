@@ -1,5 +1,7 @@
 """Meteo in base a dove ti trovi: posizione condivisa, /qui e località qualsiasi."""
 
+import pytest
+
 from azdora import messaggi
 from azdora.bot import Azdora
 from azdora.luoghi import Luogo
@@ -124,3 +126,9 @@ def test_ricerca_luoghi_guasta(bot, messaggero, luoghi):
     luoghi.guasto = True
     bot.gestisci_update(messaggio("/meteo cesenatico"))
     assert messaggero.ultimo == messaggi.METEO_NON_DISPONIBILE
+
+
+@pytest.mark.parametrize("soprannome", ["mima", "Mi.Ma", "PMM"])
+def test_soprannomi_dei_posti(bot, luoghi, soprannome):
+    bot.gestisci_update(messaggio(f"/meteo {soprannome}"))
+    assert luoghi.cercati == ["Milano Marittima"]

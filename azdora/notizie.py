@@ -33,7 +33,10 @@ log = logging.getLogger(__name__)
 class Fonte:
     nome: str
     url: str
-    area: str = "Rimini"  # Cesena, Rimini o Pesaro: serve a dare spazio a ogni zona
+    area: str = "Rimini"  # Cervia, Cesena, Rimini o Pesaro: serve a dare spazio a ogni zona
+    # Per i giornali di una città più grande (es. Ravenna): si tengono solo le notizie che
+    # nominano uno di questi posti.
+    solo_su: tuple[str, ...] = ()
 
 
 def url_google_news_sito(dominio: str) -> str:
@@ -47,11 +50,43 @@ def url_google_news_sito(dominio: str) -> str:
 
 
 # I giornali da Cesena a Pesaro.
+def url_google_news_posti(*posti: str) -> str:
+    """Ricerca su Google News di più posti insieme, nell'ultimo giorno."""
+    domanda = quote_plus(" OR ".join(f'"{p}"' for p in posti) + " when:1d")
+    return f"https://news.google.com/rss/search?q={domanda}&hl=it&gl=IT&ceid=IT:it"
+
+
+LITORALE_CERVIA = (
+    "Cervia",
+    "Milano Marittima",
+    "Cesenatico",
+    "Pinarella",
+    "Tagliata",
+    "Savio",
+    "Gatteo",
+)
+
 FONTI_ZONA: tuple[Fonte, ...] = (
-    # Cesena e Cesenatico
+    # Cervia, Milano Marittima e Cesenatico: dai giornali di Ravenna solo le notizie su di loro
+    Fonte(
+        "il Resto del Carlino Ravenna",
+        "https://www.ilrestodelcarlino.it/ravenna/rss",
+        "Cervia",
+        LITORALE_CERVIA,
+    ),
+    Fonte("Ravenna Today", "https://www.ravennatoday.it/rss", "Cervia", LITORALE_CERVIA),
+    Fonte("Ravenna Notizie", "https://www.ravennanotizie.it/feed/", "Cervia", LITORALE_CERVIA),
+    Fonte(
+        "Google News",
+        url_google_news_posti("Cervia", "Milano Marittima", "Cesenatico"),
+        "Cervia",
+        LITORALE_CERVIA,
+    ),
+    # Cesena
     Fonte("il Resto del Carlino Cesena", "https://www.ilrestodelcarlino.it/cesena/rss", "Cesena"),
     Fonte("Cesena Notizie", "https://www.cesenanotizie.net/feed/", "Cesena"),
     Fonte("Cesena Today", url_google_news_sito("cesenatoday.it"), "Cesena"),
+    Fonte("Romagna Notizie", "https://www.romagnanotizie.net/feed/", "Cesena"),
     # Rimini, Riccione e dintorni
     Fonte("Rimini Today", url_google_news_sito("riminitoday.it"), "Rimini"),
     Fonte("Altarimini", "https://www.altarimini.it/feed/", "Rimini"),
@@ -66,8 +101,31 @@ FONTI_ZONA: tuple[Fonte, ...] = (
 FONTI_RIVIERA = FONTI_ZONA  # nome storico
 AREA_DELLA_FONTE = {f.nome: f.area for f in FONTI_ZONA}
 
+# Frazioni e località di mare → il comune di cui fanno parte: se della frazione non si
+# parla, si cercano le notizie del comune.
+FRAZIONI = {
+    "milano marittima": "Cervia",
+    "pinarella": "Cervia",
+    "tagliata": "Cervia",
+    "valverde": "Cesenatico",
+    "villamarina": "Cesenatico",
+    "zadina": "Cesenatico",
+    "gatteo a mare": "Gatteo",
+    "igea marina": "Bellaria-Igea Marina",
+    "viserba": "Rimini",
+    "viserbella": "Rimini",
+    "torre pedrera": "Rimini",
+    "rivabella": "Rimini",
+    "miramare": "Rimini",
+    "rivazzurra": "Rimini",
+    "marebello": "Rimini",
+    "portoverde": "Misano Adriatico",
+    "fiorenzuola di focara": "Pesaro",
+}
+
 # I giornali locali si leggono se sei entro questo raggio da Cesena, Rimini o Pesaro.
 CENTRI_ZONA = {
+    "Cervia": (44.2630, 12.3490),
     "Cesena": (44.1391, 12.2431),
     "Rimini": (44.0594, 12.5683),
     "Pesaro": (43.9098, 12.9131),
@@ -85,7 +143,7 @@ NOTIZIE_DEL_GIORNO = 10
 MASSIMO_SUL_COMUNE = 4
 MINIMO_NOTIZIE_GIORNO = 5
 # Google News a volte pesca siti di scommesse e simili: non sono notizie.
-_SPAZZATURA = re.compile(r"scommess|pronostic|betting|casin[oò]", re.IGNORECASE)
+_SPAZZATURA = re.compile(r"scommess|pronostic|betting|casin[oò]|zazoom|howl\.link", re.IGNORECASE)
 _PAGINA_ELENCO = re.compile(
     r"^(notizie su|ultim['’]ora|ultime notizie|tutte le notizie|news su)(\s|$)", re.IGNORECASE
 )
@@ -102,11 +160,13 @@ class Notizia:
     data: datetime | None = None
     sommario: str = ""
     categorie: tuple[str, ...] = ()  # es. ("Riccione", "Eventi") su Altarimini
+    area: str = ""  # la zona del giornale da cui arriva (Cervia, Cesena, Rimini, Pesaro)
 
     @property
     def impronta(self) -> str:
         """Identificativo stabile: lo stesso articolo ripreso da due feed ha la stessa impronta."""
-        titolo = _SPAZI.sub(" ", self.titolo.lower()).strip()
+        # Solo lettere e numeri: "l’offerta" e "l'offerta" sono lo stesso titolo.
+        titolo = " ".join(re.findall(r"\w+", self.titolo.lower()))
         return hashlib.sha1(titolo.encode("utf-8")).hexdigest()[:16]
 
 
@@ -157,6 +217,11 @@ def leggi_feed(xml: bytes | str, fonte: str) -> list[Notizia]:
             Notizia(titolo, link, nome_fonte, _data(voce.findtext("pubDate")), sommario, categorie)
         )
     return notizie
+
+
+def riguarda(notizia: Notizia, posto: str) -> bool:
+    """Come ``parla_di``, ma vale anche il nome del giornale ("La Voce di Cesenatico")."""
+    return parla_di(notizia, posto) or posto.lower() in notizia.fonte.lower()
 
 
 def parla_di(notizia: Notizia, comune: str) -> bool:
@@ -256,12 +321,14 @@ def formatta_breve(notizie: Sequence[Notizia], titolo: str) -> str:
 
 URL_EVENTI_GOOGLE = (
     "https://news.google.com/rss/search?q=(sagra+OR+festa+OR+eventi)+"
-    "(Rimini+OR+Riccione+OR+Cesena+OR+Pesaro+OR+Romagna)+weekend+when:7d&hl=it&gl=IT&ceid=IT:it"
+    "(Rimini+OR+Riccione+OR+Cesena+OR+Cesenatico+OR+Cervia+OR+%22Milano+Marittima%22+OR+"
+    "Pesaro+OR+Romagna)+weekend+when:7d&hl=it&gl=IT&ceid=IT:it"
 )
 URL_ALTARIMINI = "https://www.altarimini.it/feed/"
 _RIVIERA = re.compile(
     r"rimini|riccione|romagn|cattolica|misano|bellaria|santarcangelo|verucchio|san leo|"
-    r"gradara|gabicce|san marino|cesena|forl[iì]|ravenna|cervia|valmarecchia|valconca|"
+    r"gradara|gabicce|san marino|cesena|forl[iì]|ravenna|cervia|milano marittima|"
+    r"valmarecchia|valconca|"
     r"pesaro|fano|urbino",
     re.IGNORECASE,
 )
@@ -309,7 +376,9 @@ class LettoreNotizie:
         if fonte.url.startswith("https://news.google.com/") and fonte.nome != "Google News":
             # Da Google arrivano con il nome scritto dal giornale ("RiminiToday"): uniformiamo.
             notizie = [replace(n, fonte=fonte.nome) for n in notizie]
-        return notizie
+        if fonte.solo_su:
+            notizie = [n for n in notizie if any(riguarda(n, posto) for posto in fonte.solo_su)]
+        return [replace(n, area=fonte.area) for n in notizie]
 
     def _leggi(self, url: str, nome: str) -> list[Notizia] | None:
         """Scarica e legge un feed; ``None`` se il sito non risponde o rifiuta la richiesta."""
@@ -331,7 +400,7 @@ class LettoreNotizie:
         altre = alternate(
             [n for n in pulite if not parla_di(n, comune)],
             NOTIZIE_DEL_GIORNO - len(vicine),
-            gruppo=lambda n: AREA_DELLA_FONTE.get(n.fonte, n.fonte),
+            gruppo=lambda n: n.area or n.fonte,
         )
         return prima_quelle_di([*vicine, *altre], comune)
 
@@ -340,7 +409,10 @@ class LettoreNotizie:
         if in_zona(lat, lon):
             for fonte in self._fonti_riviera:
                 trovate += [n for n in self._scarica(fonte) if parla_di(n, comune)]
-        trovate += self._scarica(Fonte("Google News", url_google_news(comune)))
+        # Google cerca anche dentro gli articoli e pesca roba lontana: si tiene solo ciò
+        # che nomina il posto nel titolo o arriva da un giornale con quel nome.
+        da_google = self._scarica(Fonte("Google News", url_google_news(comune)))
+        trovate += [n for n in da_google if riguarda(n, comune)]
         pulite = [n for n in recenti(trovate, adesso) if not e_spazzatura(n)]
         return ordina(senza_doppioni(pulite))
 
