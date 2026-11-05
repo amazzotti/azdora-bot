@@ -24,7 +24,9 @@ class ErroreTelegram(RuntimeError):
 class Messaggero(Protocol):
     """Quello che serve al bot per parlare: Telegram vero, o la console nel simulatore."""
 
-    def invia_messaggio(self, chat_id: int, testo: str) -> None: ...
+    def invia_messaggio(
+        self, chat_id: int, testo: str, tastiera: dict[str, Any] | None = None
+    ) -> None: ...
 
     def esci_da_chat(self, chat_id: int) -> None: ...
 
@@ -49,14 +51,19 @@ class Telegram:
             raise ErroreTelegram(f"{metodo}: {descrizione or 'risposta non valida'}")
         return dati.get("result")
 
-    def invia_messaggio(self, chat_id: int, testo: str) -> None:
-        self.chiama(
-            "sendMessage",
-            chat_id=chat_id,
-            text=testo[:LUNGHEZZA_MASSIMA],
-            parse_mode="HTML",
-            link_preview_options={"is_disabled": True},
-        )
+    def invia_messaggio(
+        self, chat_id: int, testo: str, tastiera: dict[str, Any] | None = None
+    ) -> None:
+        """Manda un messaggio HTML; ``tastiera`` è un ``reply_markup`` della Bot API."""
+        parametri: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": testo[:LUNGHEZZA_MASSIMA],
+            "parse_mode": "HTML",
+            "link_preview_options": {"is_disabled": True},
+        }
+        if tastiera is not None:
+            parametri["reply_markup"] = tastiera
+        self.chiama("sendMessage", **parametri)
 
     def esci_da_chat(self, chat_id: int) -> None:
         self.chiama("leaveChat", chat_id=chat_id)

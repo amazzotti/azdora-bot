@@ -176,19 +176,43 @@ def mare_del_giorno(giorno: MareGiorno | None) -> str:
 
 
 AIUTO = """👋 <b>Ciao, sono l'Azdora!</b>
-Tengo d'occhio il tempo tra Riccione e Rimini.
+Tengo d'occhio il tempo tra Riccione e Rimini, e ovunque tu sia.
 
 /oggi – riepilogo di oggi (meteo, vento, mare, consigli)
 /domani – com'è domani
 /meteo – meteo adesso e prossimi giorni
 /vento – vento adesso e nelle prossime ore
 /mare – onde e temperatura dell'acqua
+/qui – meteo dove ti trovi adesso 📍
 /id – l'id di questa chat
 /aiuto – questo messaggio
 
-Puoi aggiungere la località: <code>/vento rimini</code>, <code>/meteo rn</code>.
+Puoi aggiungere qualsiasi località: <code>/vento rimini</code>, <code>/meteo cesenatico</code>.
 Senza località uso Riccione.
+Mandami la tua posizione (📎 → Posizione) e ti dico che tempo fa lì.
 Ogni mattina alle 7 ti mando il riepilogo. ☕"""
+
+CREDITI_OSM = '<i>Luogo: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a></i>'
+
+# Tastiera con il pulsante che chiede la posizione (funziona solo nelle chat private).
+TASTIERA_POSIZIONE = {
+    "keyboard": [[{"text": "📍 Manda la mia posizione", "request_location": True}]],
+    "resize_keyboard": True,
+    "one_time_keyboard": True,
+    "input_field_placeholder": "Tocca il pulsante qui sotto",
+}
+TOGLI_TASTIERA = {"remove_keyboard": True}
+
+QUI_PRIVATA = "📍 Tocca il pulsante qui sotto e ti dico che tempo fa dove sei."
+QUI_GRUPPO = (
+    "📍 Nei gruppi il pulsante non funziona: manda la posizione con 📎 → <b>Posizione</b> "
+    "e vi dico che tempo fa lì."
+)
+NOME_POSIZIONE_SCONOSCIUTO = "La tua posizione"
+
+
+def mare_lontano(nome: str) -> str:
+    return f"🏞️ {escape(nome)} è lontano dal mare: niente onde da mostrare."
 
 
 def messaggio_id(chat_id: int, autorizzata: bool) -> str:
@@ -202,6 +226,6 @@ def messaggio_id(chat_id: int, autorizzata: bool) -> str:
     return "\n".join(righe)
 
 
-LOCALITA_SCONOSCIUTA = "🤔 Non conosco «{nome}». Per ora so dire di: {elenco}."
+LOCALITA_SCONOSCIUTA = "🤔 Non trovo «{nome}». Prova a scrivere il nome del comune per intero."
 COMANDO_SCONOSCIUTO = "🤔 Non conosco questo comando. Scrivi /aiuto per vedere cosa so fare."
 METEO_NON_DISPONIBILE = "😓 Open-Meteo non risponde in questo momento. Riprova tra qualche minuto."

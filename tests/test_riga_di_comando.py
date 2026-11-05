@@ -19,6 +19,20 @@ def test_simulatore_offline(capsys):
     assert "<b>" not in uscita  # i tag HTML vengono tolti
 
 
+def test_simulatore_posizione_e_localita_qualsiasi(capsys):
+    simula.main(["--offline", "/qui", "posizione:43.978,12.697", "/meteo misano"])
+    uscita = capsys.readouterr().out
+    assert "[ 📍 Manda la mia posizione ]" in uscita
+    assert "Misano Adriatico (RN)" in uscita
+    assert "Meteo a Misano Adriatico" in uscita
+
+
+def test_update_simulato_con_posizione():
+    update = simula.update_simulato("posizione:44.06,12.57")
+    assert update["message"]["location"] == {"latitude": 44.06, "longitude": 12.57}
+    assert "text" not in update["message"]
+
+
 def test_simulatore_html_grezzo(capsys):
     simula.main(["--offline", "--html", "/mare"])
     assert "<b>Mare a Riccione</b>" in capsys.readouterr().out

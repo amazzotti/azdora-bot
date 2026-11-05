@@ -8,6 +8,7 @@ import httpx
 
 from azdora.bot import Azdora
 from azdora.config import Impostazioni
+from azdora.luoghi import Luoghi
 from azdora.meteo.openmeteo import OpenMeteo
 from azdora.telegram import Telegram
 
@@ -29,4 +30,5 @@ def crea_azdora(impostazioni: Impostazioni, http: httpx.Client) -> Azdora:
         impostazioni=impostazioni,
         messaggero=Telegram(impostazioni.richiedi_token(), http),
         meteo=OpenMeteo(http),
+        luoghi=Luoghi(http),
     )

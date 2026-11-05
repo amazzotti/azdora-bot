@@ -64,7 +64,7 @@ def test_il_gruppo_di_coppia_puo_usare_i_comandi(bot, messaggero):
 def test_localita_sconosciuta_con_html_neutralizzato(bot, messaggero, meteo):
     bot.gestisci_update(messaggio("/meteo <b>Bologna</b>"))
     assert "&lt;b&gt;Bologna&lt;/b&gt;" in messaggero.ultimo
-    assert "Riccione, Rimini" in messaggero.ultimo
+    assert "Non trovo" in messaggero.ultimo
     assert meteo.richieste == []
 
 

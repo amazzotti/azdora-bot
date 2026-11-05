@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from html import escape
 
 from azdora.messaggi import (
     CREDITI,
+    CREDITI_OSM,
     data_lunga,
     gradi,
     mare_del_giorno,
@@ -28,6 +30,7 @@ from azdora.meteo.vento import descrivi_vento
 # Soglie dei consigli, raccolte qui per poterle ritoccare facilmente.
 PIOGGIA_CERTA = 60
 PIOGGIA_POSSIBILE = 30
+PIOGGIA_IMPROBABILE = 10  # sotto questa soglia la pioggia prevista è solo "rumore" del modello
 RAFFICHE_FORTI = 50
 RAFFICHE_VENTOSO = 35
 GELO = 3
@@ -74,7 +77,7 @@ def consigli(giorno: MeteoGiorno, mare: MareGiorno | None = None) -> list[str]:
         lista.append("❄️ Neve in arrivo: gomme invernali o catene a bordo.")
     if prob >= PIOGGIA_CERTA or (codice in CODICI_PIOGGIA and prob >= PIOGGIA_POSSIBILE):
         lista.append(f"☂️ Porta l'ombrello: probabilità di pioggia {prob:.0f}%.")
-    elif prob >= PIOGGIA_POSSIBILE or codice in CODICI_PIOGGIA:
+    elif prob >= PIOGGIA_POSSIBILE or (codice in CODICI_PIOGGIA and prob >= PIOGGIA_IMPROBABILE):
         lista.append(f"🌂 Possibile qualche goccia ({prob:.0f}%): ombrello in macchina.")
     if codice in CODICI_NEBBIA:
         lista.append("🌫️ Nebbia: prudenza in A14 e sulla Statale 16.")
@@ -114,7 +117,7 @@ def consigli(giorno: MeteoGiorno, mare: MareGiorno | None = None) -> list[str]:
 
 def _blocco_localita(dati: DatiLocalita, data: date, con_attuale: bool) -> list[str]:
     giorno = dati.giorno(data)
-    nome = dati.previsioni.localita.nome
+    nome = escape(dati.previsioni.localita.nome)  # può arrivare da un servizio esterno
     if giorno is None:
         return [f"📍 <b>{nome}</b>", "Previsioni non disponibili."]
     righe = [
@@ -140,6 +143,7 @@ def componi_riepilogo(
     *,
     titolo: str,
     con_attuale: bool,
+    crediti: str = CREDITI,
 ) -> str:
     """Messaggio completo per una giornata. La prima località decide alba, tramonto e consigli."""
     righe = [titolo]
@@ -155,7 +159,7 @@ def componi_riepilogo(
         righe += ["", sole, "", "<b>Consigli</b>"]
         righe += consigli(giorno, principale.giorno_mare(data) if principale else None)
 
-    righe += ["", CREDITI]
+    righe += ["", crediti]
     return "\n".join(righe)
 
 
@@ -172,3 +176,12 @@ def riepilogo_oggi(localita: Sequence[DatiLocalita], adesso: datetime, nome: str
 def riepilogo_domani(localita: Sequence[DatiLocalita], domani: date) -> str:
     titolo = f"🔮 <b>Domani, {data_lunga(domani)}</b>"
     return componi_riepilogo(localita, domani, titolo=titolo, con_attuale=False)
+
+
+def riepilogo_posizione(dati: DatiLocalita, adesso: datetime, nome_da_osm: bool) -> str:
+    """Risposta a una posizione mandata su Telegram: com'è il tempo lì, adesso."""
+    titolo = f"🧭 <b>Meteo dove sei</b>\n{data_lunga(adesso.date())}, ore {ora(adesso)}"
+    crediti = f"{CREDITI} · {CREDITI_OSM}" if nome_da_osm else CREDITI
+    return componi_riepilogo(
+        [dati], adesso.date(), titolo=titolo, con_attuale=True, crediti=crediti
+    )

@@ -39,6 +39,14 @@ def test_invia_messaggio_in_html_senza_anteprime(telegram):
 
 
 @respx.mock
+def test_invia_messaggio_con_tastiera(telegram):
+    rotta = respx.post(f"{BASE}/sendMessage").mock(return_value=_ok())
+    tastiera = {"remove_keyboard": True}
+    telegram.invia_messaggio(42, "ok", tastiera)
+    assert json.loads(rotta.calls.last.request.content)["reply_markup"] == tastiera
+
+
+@respx.mock
 def test_messaggi_troppo_lunghi_vengono_tagliati(telegram):
     rotta = respx.post(f"{BASE}/sendMessage").mock(return_value=_ok())
     telegram.invia_messaggio(42, "x" * 5000)

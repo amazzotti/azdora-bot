@@ -1,8 +1,8 @@
 """Il cervello del bot: riceve un update di Telegram e decide cosa rispondere.
 
-Non sa nulla di HTTP né di Vercel: riceve il messaggero (chi spedisce i messaggi) e la
-fonte meteo dall'esterno. Così nei test si sostituiscono con dei finti e nel
-simulatore con la console.
+Non sa nulla di HTTP né di Vercel: riceve dall'esterno il messaggero (chi spedisce i
+messaggi), la fonte meteo e il servizio dei luoghi. Così nei test si sostituiscono con
+dei finti e nel simulatore con la console.
 """
 
 from __future__ import annotations
@@ -16,8 +16,14 @@ from typing import Any
 
 from azdora import messaggi
 from azdora.config import FUSO_ORARIO, LOCALITA, Impostazioni, Localita, trova_localita
-from azdora.meteo.openmeteo import ErroreMeteo, FonteMeteo
-from azdora.riepilogo import DatiLocalita, riepilogo_domani, riepilogo_oggi
+from azdora.luoghi import CercaLuoghi, distanza_km, localita_qui
+from azdora.meteo.openmeteo import ErroreMeteo, FonteMeteo, PrevisioniMare
+from azdora.riepilogo import (
+    DatiLocalita,
+    riepilogo_domani,
+    riepilogo_oggi,
+    riepilogo_posizione,
+)
 from azdora.telegram import Messaggero
 
 log = logging.getLogger(__name__)
@@ -26,14 +32,28 @@ log = logging.getLogger(__name__)
 COMANDI: tuple[tuple[str, str], ...] = (
     ("oggi", "Riepilogo di oggi: meteo, vento, mare e consigli"),
     ("domani", "Com'è domani"),
-    ("meteo", "Meteo adesso e prossimi giorni (es. /meteo rimini)"),
+    ("meteo", "Meteo adesso e prossimi giorni (es. /meteo cesenatico)"),
     ("vento", "Vento adesso e nelle prossime ore"),
     ("mare", "Onde e temperatura dell'acqua"),
+    ("qui", "Meteo dove ti trovi adesso"),
     ("id", "Mostra l'id di questa chat"),
     ("aiuto", "Cosa so fare"),
 )
 
 TIPI_GRUPPO = frozenset({"group", "supergroup"})
+
+# Oltre questa distanza il punto marino di Open-Meteo non descrive più "il mare lì davanti".
+DISTANZA_MASSIMA_MARE_KM = 30
+
+
+@dataclass(frozen=True)
+class Chat:
+    id: int
+    tipo: str = "private"
+
+    @property
+    def e_un_gruppo(self) -> bool:
+        return self.tipo in TIPI_GRUPPO
 
 
 @dataclass(frozen=True)
@@ -68,13 +88,15 @@ class Azdora:
         impostazioni: Impostazioni,
         messaggero: Messaggero,
         meteo: FonteMeteo,
+        luoghi: CercaLuoghi | None = None,
         orologio: Callable[[], datetime] = adesso_a_roma,
     ) -> None:
         self.impostazioni = impostazioni
         self.messaggero = messaggero
         self.meteo = meteo
+        self.luoghi = luoghi
         self.orologio = orologio
-        self._azioni: dict[str, Callable[[int, Comando], None]] = {
+        self._azioni: dict[str, Callable[[Chat, Comando], None]] = {
             "start": self._aiuto,
             "aiuto": self._aiuto,
             "help": self._aiuto,
@@ -83,13 +105,18 @@ class Azdora:
             "meteo": self._meteo,
             "vento": self._vento,
             "mare": self._mare,
+            "qui": self._qui,
             "id": self._id,
         }
 
     # --- Ingresso ---------------------------------------------------------------------
 
     def gestisci_update(self, update: dict[str, Any]) -> None:
-        """Punto di ingresso per ogni update arrivato dal webhook."""
+        """Punto di ingresso per ogni update arrivato dal webhook.
+
+        Gli aggiornamenti della posizione in tempo reale arrivano come ``edited_message``
+        e per ora vengono ignorati: si risponde solo alla posizione iniziale.
+        """
         if "my_chat_member" in update:
             self._aggiunto_a_chat(update["my_chat_member"])
         elif "message" in update:
@@ -119,29 +146,33 @@ class Azdora:
             self.messaggero.esci_da_chat(chat_id)
 
     def _messaggio(self, messaggio: dict[str, Any]) -> None:
-        chat = messaggio.get("chat", {})
-        chat_id = chat.get("id")
-        if chat_id is None:
+        dati_chat = messaggio.get("chat", {})
+        if dati_chat.get("id") is None:
             return
+        chat = Chat(dati_chat["id"], dati_chat.get("type", "private"))
         comando = leggi_comando(messaggio.get("text"))
-        if comando is None:
-            return  # Per ora l'Azdora risponde solo ai comandi.
-        if self._non_per_me(comando):
+        posizione = messaggio.get("location")
+        if comando is None and posizione is None:
+            return  # Testo libero: per ora l'Azdora risponde solo a comandi e posizioni.
+        if comando is not None and self._non_per_me(comando):
             return
 
-        if not self._e_autorizzata(chat_id):
-            self._chat_sconosciuta(chat_id, chat.get("type"), messaggio, comando)
+        if not self._e_autorizzata(chat.id):
+            self._chat_sconosciuta(chat, messaggio, comando)
             return
 
-        azione = self._azioni.get(comando.nome)
-        if azione is None:
-            self.messaggero.invia_messaggio(chat_id, messaggi.COMANDO_SCONOSCIUTO)
-            return
         try:
-            azione(chat_id, comando)
+            if posizione is not None:
+                self._posizione(chat, posizione)
+            elif comando is not None:
+                azione = self._azioni.get(comando.nome)
+                if azione is None:
+                    self.messaggero.invia_messaggio(chat.id, messaggi.COMANDO_SCONOSCIUTO)
+                else:
+                    azione(chat, comando)
         except ErroreMeteo as errore:
             log.warning("Meteo non disponibile: %s", errore)
-            self.messaggero.invia_messaggio(chat_id, messaggi.METEO_NON_DISPONIBILE)
+            self.messaggero.invia_messaggio(chat.id, messaggi.METEO_NON_DISPONIBILE)
 
     def _non_per_me(self, comando: Comando) -> bool:
         """Nei gruppi ``/meteo@altro_bot`` è rivolto a un altro bot."""
@@ -149,74 +180,109 @@ class Azdora:
         return bool(comando.destinatario and mio and comando.destinatario.lower() != mio)
 
     def _chat_sconosciuta(
-        self, chat_id: int, tipo: str | None, messaggio: dict[str, Any], comando: Comando
+        self, chat: Chat, messaggio: dict[str, Any], comando: Comando | None
     ) -> None:
         """Chat non autorizzata: solo /start e /id rispondono, per aiutare la configurazione."""
         mittente = messaggio.get("from", {}).get("id")
-        if tipo in TIPI_GRUPPO and not self._e_il_padrone(mittente):
-            log.warning("Messaggio da un gruppo non autorizzato (%s): esco", chat_id)
-            self.messaggero.esci_da_chat(chat_id)
+        if chat.e_un_gruppo and not self._e_il_padrone(mittente):
+            log.warning("Messaggio da un gruppo non autorizzato (%s): esco", chat.id)
+            self.messaggero.esci_da_chat(chat.id)
             return
-        if comando.nome in {"start", "id"}:
-            self.messaggero.invia_messaggio(chat_id, messaggi.messaggio_id(chat_id, False))
+        if comando is not None and comando.nome in {"start", "id"}:
+            self.messaggero.invia_messaggio(chat.id, messaggi.messaggio_id(chat.id, False))
 
-    # --- Comandi ----------------------------------------------------------------------
+    # --- Località e mare --------------------------------------------------------------
 
-    def _localita_richiesta(self, chat_id: int, comando: Comando) -> Localita | None:
-        localita = trova_localita(comando.testo_argomenti)
+    def _localita_richiesta(self, chat: Chat, comando: Comando) -> Localita | None:
+        """Riccione/Rimini (anche abbreviate) o qualsiasi comune, cercato per nome."""
+        testo = comando.testo_argomenti
+        localita = trova_localita(testo)
+        if localita is None and self.luoghi is not None:
+            localita = self.luoghi.cerca(testo)
         if localita is None:
-            elenco = ", ".join(loc.nome for loc in LOCALITA)
             self.messaggero.invia_messaggio(
-                chat_id,
-                messaggi.LOCALITA_SCONOSCIUTA.format(
-                    nome=escape(comando.testo_argomenti), elenco=elenco
-                ),
+                chat.id, messaggi.LOCALITA_SCONOSCIUTA.format(nome=escape(testo))
             )
         return localita
 
-    def _aiuto(self, chat_id: int, comando: Comando) -> None:
-        self.messaggero.invia_messaggio(chat_id, messaggi.AIUTO)
+    def _mare_vicino(self, localita: Localita) -> PrevisioniMare | None:
+        """Il mare davanti alla località, o ``None`` se è nell'entroterra o non disponibile."""
+        try:
+            mare = self.meteo.mare(localita)
+        except ErroreMeteo as errore:
+            # Senza il mare il messaggio resta utile: lo mandiamo lo stesso.
+            log.warning("Mare non disponibile per %s: %s", localita.nome, errore)
+            return None
+        if not mare.ha_dati:
+            return None
+        if mare.punto is not None:
+            distanza = distanza_km(localita.lat, localita.lon, *mare.punto)
+            if distanza > DISTANZA_MASSIMA_MARE_KM:
+                return None
+        return mare
 
-    def _id(self, chat_id: int, comando: Comando) -> None:
-        self.messaggero.invia_messaggio(chat_id, messaggi.messaggio_id(chat_id, True))
+    # --- Comandi ----------------------------------------------------------------------
 
-    def _meteo(self, chat_id: int, comando: Comando) -> None:
-        if localita := self._localita_richiesta(chat_id, comando):
+    def _aiuto(self, chat: Chat, comando: Comando) -> None:
+        self.messaggero.invia_messaggio(chat.id, messaggi.AIUTO)
+
+    def _id(self, chat: Chat, comando: Comando) -> None:
+        self.messaggero.invia_messaggio(chat.id, messaggi.messaggio_id(chat.id, True))
+
+    def _meteo(self, chat: Chat, comando: Comando) -> None:
+        if localita := self._localita_richiesta(chat, comando):
             testo = messaggi.messaggio_meteo(self.meteo.previsioni(localita))
-            self.messaggero.invia_messaggio(chat_id, testo)
+            self.messaggero.invia_messaggio(chat.id, testo)
 
-    def _vento(self, chat_id: int, comando: Comando) -> None:
-        if localita := self._localita_richiesta(chat_id, comando):
+    def _vento(self, chat: Chat, comando: Comando) -> None:
+        if localita := self._localita_richiesta(chat, comando):
             testo = messaggi.messaggio_vento(self.meteo.previsioni(localita))
-            self.messaggero.invia_messaggio(chat_id, testo)
+            self.messaggero.invia_messaggio(chat.id, testo)
 
-    def _mare(self, chat_id: int, comando: Comando) -> None:
-        if localita := self._localita_richiesta(chat_id, comando):
+    def _mare(self, chat: Chat, comando: Comando) -> None:
+        if localita := self._localita_richiesta(chat, comando):
+            mare = self._mare_vicino(localita)
+            testo = (
+                messaggi.messaggio_mare(mare)
+                if mare is not None
+                else messaggi.mare_lontano(localita.nome)
+            )
+            self.messaggero.invia_messaggio(chat.id, testo)
+
+    def _qui(self, chat: Chat, comando: Comando) -> None:
+        if chat.e_un_gruppo:
+            # Il pulsante "request_location" Telegram lo permette solo nelle chat private.
+            self.messaggero.invia_messaggio(chat.id, messaggi.QUI_GRUPPO)
+        else:
             self.messaggero.invia_messaggio(
-                chat_id, messaggi.messaggio_mare(self.meteo.mare(localita))
+                chat.id, messaggi.QUI_PRIVATA, messaggi.TASTIERA_POSIZIONE
             )
 
-    def _oggi(self, chat_id: int, comando: Comando) -> None:
-        self.messaggero.invia_messaggio(chat_id, self.testo_oggi(saluta=False))
+    def _posizione(self, chat: Chat, posizione: dict[str, Any]) -> None:
+        """Hai mandato la posizione: meteo, vento, mare (se vicino) e consigli per quel punto."""
+        lat, lon = float(posizione["latitude"]), float(posizione["longitude"])
+        nome = self.luoghi.nome_di(lat, lon) if self.luoghi is not None else None
+        localita = localita_qui(lat, lon, nome or messaggi.NOME_POSIZIONE_SCONOSCIUTO)
+        dati = DatiLocalita(self.meteo.previsioni(localita), self._mare_vicino(localita))
+        testo = riepilogo_posizione(dati, self.orologio(), nome_da_osm=nome is not None)
+        # Nelle chat private toglie il pulsante "Manda la mia posizione" dopo l'uso.
+        tastiera = None if chat.e_un_gruppo else messaggi.TOGLI_TASTIERA
+        self.messaggero.invia_messaggio(chat.id, testo, tastiera)
 
-    def _domani(self, chat_id: int, comando: Comando) -> None:
+    def _oggi(self, chat: Chat, comando: Comando) -> None:
+        self.messaggero.invia_messaggio(chat.id, self.testo_oggi(saluta=False))
+
+    def _domani(self, chat: Chat, comando: Comando) -> None:
         domani = self.orologio().date() + timedelta(days=1)
-        self.messaggero.invia_messaggio(chat_id, riepilogo_domani(self._dati_localita(), domani))
+        self.messaggero.invia_messaggio(chat.id, riepilogo_domani(self._dati_localita(), domani))
 
     # --- Riepiloghi -------------------------------------------------------------------
 
     def _dati_localita(self) -> list[DatiLocalita]:
-        dati = []
-        for localita in LOCALITA:
-            previsioni = self.meteo.previsioni(localita)
-            try:
-                mare = self.meteo.mare(localita)
-            except ErroreMeteo as errore:
-                # Senza il mare il riepilogo resta utile: lo mandiamo lo stesso.
-                log.warning("Mare non disponibile per %s: %s", localita.nome, errore)
-                mare = None
-            dati.append(DatiLocalita(previsioni, mare))
-        return dati
+        return [
+            DatiLocalita(self.meteo.previsioni(localita), self._mare_vicino(localita))
+            for localita in LOCALITA
+        ]
 
     def testo_oggi(self, saluta: bool) -> str:
         nome = self.impostazioni.nome_utente if saluta else ""

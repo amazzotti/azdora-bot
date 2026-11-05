@@ -139,6 +139,15 @@ class PrevisioniMare:
     localita: Localita
     attuale: MareAttuale
     giorni: tuple[MareGiorno, ...]
+    # Punto della griglia marina scelto da Open-Meteo (può essere a qualche km dalla costa).
+    punto: tuple[float, float] | None = None
+
+    @property
+    def ha_dati(self) -> bool:
+        """Nell'entroterra Open-Meteo risponde, ma con tutti i valori a ``null``."""
+        return self.attuale.altezza_onde is not None or any(
+            g.altezza_max is not None for g in self.giorni
+        )
 
 
 # --- Lettura del JSON -------------------------------------------------------------------
@@ -253,8 +262,12 @@ def leggi_mare(dati: dict[str, Any], localita: Localita) -> PrevisioniMare:
         )
         for i in range(g)
     )
+    punto = None
+    if dati.get("latitude") is not None and dati.get("longitude") is not None:
+        punto = (float(dati["latitude"]), float(dati["longitude"]))
     return PrevisioniMare(
         localita=localita,
+        punto=punto,
         attuale=MareAttuale(
             ora=ora_attuale,
             altezza_onde=_numero(attuale.get("wave_height")),
@@ -320,6 +333,7 @@ class OpenMeteo:
                 "longitude": localita.mare_lon,
                 "current": ",".join(VARIABILI_MARE_ATTUALI),
                 "daily": ",".join(VARIABILI_MARE_GIORNALIERE),
+                "cell_selection": "sea",
                 "timezone": "Europe/Rome",
                 "forecast_days": self._giorni,
             },

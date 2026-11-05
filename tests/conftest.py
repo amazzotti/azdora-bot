@@ -12,6 +12,7 @@ import pytest
 
 from azdora.bot import Azdora
 from azdora.config import FUSO_ORARIO, RICCIONE, Impostazioni, Localita
+from azdora.luoghi import ErroreLuoghi
 from azdora.meteo.openmeteo import (
     ErroreMeteo,
     Previsioni,
@@ -57,10 +58,14 @@ class FintoMessaggero:
     """Registra i messaggi invece di spedirli."""
 
     inviati: list[tuple[int, str]] = field(default_factory=list)
+    tastiere: list[dict[str, Any] | None] = field(default_factory=list)
     uscite: list[int] = field(default_factory=list)
 
-    def invia_messaggio(self, chat_id: int, testo: str) -> None:
+    def invia_messaggio(
+        self, chat_id: int, testo: str, tastiera: dict[str, Any] | None = None
+    ) -> None:
         self.inviati.append((chat_id, testo))
+        self.tastiere.append(tastiera)
 
     def esci_da_chat(self, chat_id: int) -> None:
         self.uscite.append(chat_id)
@@ -94,6 +99,32 @@ class FintoMeteo:
         return leggi_mare(self.dati_mare, localita)
 
 
+@dataclass
+class FintiLuoghi:
+    """Conosce solo Misano Adriatico e Bologna; per le coordinate risponde con ``nome``."""
+
+    nome: str | None = "Misano Adriatico (RN)"
+    guasto: bool = False
+    cercati: list[str] = field(default_factory=list)
+
+    def cerca(self, nome: str) -> Localita | None:
+        self.cercati.append(nome)
+        if self.guasto:
+            raise ErroreLuoghi("finto guasto")
+        conosciuti = {
+            "misano adriatico": (43.97714, 12.69805, "Misano Adriatico"),
+            "bologna": (44.49381, 11.33875, "Bologna"),
+        }
+        trovato = conosciuti.get(nome.lower())
+        if trovato is None:
+            return None
+        lat, lon, nome_ufficiale = trovato
+        return Localita(f"geo:{nome}", nome_ufficiale, lat, lon, lat, lon)
+
+    def nome_di(self, lat: float, lon: float) -> str | None:
+        return self.nome
+
+
 @pytest.fixture
 def impostazioni() -> Impostazioni:
     return Impostazioni(
@@ -118,8 +149,30 @@ def meteo(json_previsioni: dict[str, Any], json_mare: dict[str, Any]) -> FintoMe
 
 
 @pytest.fixture
-def bot(impostazioni: Impostazioni, messaggero: FintoMessaggero, meteo: FintoMeteo) -> Azdora:
-    return Azdora(impostazioni, messaggero, meteo, orologio=lambda: ADESSO)
+def luoghi() -> FintiLuoghi:
+    return FintiLuoghi()
+
+
+@pytest.fixture
+def bot(
+    impostazioni: Impostazioni, messaggero: FintoMessaggero, meteo: FintoMeteo, luoghi: FintiLuoghi
+) -> Azdora:
+    return Azdora(impostazioni, messaggero, meteo, luoghi, orologio=lambda: ADESSO)
+
+
+def posizione(
+    lat: float, lon: float, chat_id: int = PADRONE, tipo: str = "private"
+) -> dict[str, Any]:
+    """Update di Telegram con una posizione condivisa."""
+    return {
+        "update_id": 3,
+        "message": {
+            "message_id": 3,
+            "chat": {"id": chat_id, "type": tipo},
+            "from": {"id": chat_id if tipo == "private" else PADRONE},
+            "location": {"latitude": lat, "longitude": lon},
+        },
+    }
 
 
 def messaggio(
