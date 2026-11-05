@@ -1,5 +1,6 @@
 # Collega il bot al webhook su Vercel e aggiorna il menu dei comandi.
 # Si lancia a mano: Actions → "Configura bot" → Run workflow.
+# Con "Solo controllo" mostra lo stato del webhook e l'ultimo errore senza cambiare nulla.
 name: Configura bot
 
 on:
@@ -8,6 +9,11 @@ on:
       url:
         description: "Indirizzo del progetto Vercel (es. https://azdora-bot.vercel.app)"
         required: true
+        default: "https://azdora-bot.vercel.app"
+      solo_controllo:
+        description: "Solo controllo: mostra lo stato e l'ultimo errore, senza cambiare nulla"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -28,6 +34,12 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
-          # L'input passa da una variabile d'ambiente, non dentro lo script: evita injection.
+          # Gli input passano da variabili d'ambiente, non dentro lo script: evita injection.
           URL_VERCEL: ${{ inputs.url }}
-        run: python -m azdora.configura --url "$URL_VERCEL"
+          SOLO_CONTROLLO: ${{ inputs.solo_controllo }}
+        run: |
+          if [ "$SOLO_CONTROLLO" = "true" ]; then
+            python -m azdora.configura --solo-info
+          else
+            python -m azdora.configura --url "$URL_VERCEL"
+          fi
