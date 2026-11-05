@@ -107,3 +107,63 @@ def test_lavoro_mattino_da_riga_di_comando(env_telegram, json_previsioni, json_m
     assert lavori.main(["mattino"]) == 0
     assert invio.call_count == 1
     assert "completato" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("env", "frammento"),
+    [
+        ({}, "TELEGRAM_BOT_TOKEN"),
+        ({"TELEGRAM_BOT_TOKEN": "123:abc"}, "TELEGRAM_WEBHOOK_SECRET"),
+    ],
+)
+def test_configura_senza_secret_spiega_cosa_fare(monkeypatch, capsys, env, frammento):
+    for nome in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET"):
+        monkeypatch.delenv(nome, raising=False)
+    for nome, valore in env.items():
+        monkeypatch.setenv(nome, valore)
+    assert configura.main(["--url", "https://a.vercel.app"]) == 1
+    uscita = capsys.readouterr().out
+    assert f"❌ Manca {frammento}" in uscita
+    assert "👉" in uscita
+
+
+@respx.mock
+def test_configura_token_sbagliato(env_telegram, capsys):
+    respx.post(f"{BASE}/getMe").mock(
+        return_value=httpx.Response(401, json={"ok": False, "description": "Unauthorized"})
+    )
+    assert configura.main(["--url", "https://a.vercel.app"]) == 1
+    uscita = capsys.readouterr().out
+    assert "Telegram non riconosce il token" in uscita
+    assert "123:abc" not in uscita
+
+
+def test_configura_indirizzo_sbagliato(env_telegram, capsys):
+    assert configura.main(["--url", "azdora-bot.vercel.app"]) == 1
+    assert "https://azdora-bot.vercel.app" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("errore", "frammento"),
+    [
+        ("setWebhook: Bad Request: secret token contains unallowed characters", "lettere, numeri"),
+        ("qualcos'altro", "Controlla i secret"),
+    ],
+)
+def test_consigli(errore, frammento):
+    assert frammento in configura.consiglio(errore)
+
+
+@respx.mock
+def test_configura_solo_info(env_telegram, capsys):
+    respx.post(f"{BASE}/getMe").mock(
+        return_value=httpx.Response(200, json={"ok": True, "result": {"username": "azdora_bot"}})
+    )
+    respx.post(f"{BASE}/getWebhookInfo").mock(
+        return_value=httpx.Response(
+            200, json={"ok": True, "result": {"url": "", "last_error_message": "timeout"}}
+        )
+    )
+    assert configura.main(["--solo-info"]) == 0
+    uscita = capsys.readouterr().out
+    assert "(nessuno)" in uscita and "Ultimo errore: timeout" in uscita
