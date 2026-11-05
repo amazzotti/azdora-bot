@@ -209,7 +209,7 @@ AIUTO = """👋 <b>Ciao, sono l'Azdora!</b> Mando avanti la casa. Scrivimi come 
 /rifiuti – raccolta differenziata, avviso la sera prima
 /promemoria – i tuoi promemoria · /sera – riepilogo della sera
 /orari – quando ti scrivo (mattino, sera, notizie, silenzio)
-/telefono – posizione automatica dal telefono
+/telefono – posizione automatica dal telefono · /stato – come sto
 /weekend – meteo, gite e sagre · /sagre – feste da Cervia a Pesaro
 
 Ogni mattina alle 7 ti mando il riepilogo ☕. /id – l'id di questa chat"""
@@ -398,3 +398,10 @@ def sera_impostata(attiva: bool) -> str:
             "i promemoria e le scadenze del giorno dopo. /sera per spegnerlo."
         )
     return "🌙 Riepilogo della sera <b>spento</b>. I rifiuti te li ricordo comunque."
+
+
+def riparato(in_coda: int) -> str:
+    return (
+        f"🔧 Mi ero inceppata: Telegram aveva {in_coda} messaggi bloccati. Ho svuotato la "
+        "coda e adesso funziono di nuovo. Se mi avevi scritto da poco, riscrivimi pure!"
+    )

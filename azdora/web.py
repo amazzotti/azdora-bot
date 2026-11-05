@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from azdora.archivio import ErroreArchivio
 from azdora.bot import Azdora
 from azdora.config import Impostazioni
 
@@ -41,6 +42,17 @@ def _segreto_valido(atteso: str, ricevuto: str | None) -> bool:
     return bool(atteso) and ricevuto is not None and hmac.compare_digest(atteso, ricevuto)
 
 
+def gia_ricevuto(bot: Azdora, update_id: Any) -> bool:
+    """Questo update di Telegram è già arrivato una volta?"""
+    if not isinstance(update_id, int) or not bot.archivio.persistente:
+        return False
+    try:
+        (nuovo,) = bot.archivio.segna_nuovi([f"update:{update_id}"], 24 * 3600)
+    except ErroreArchivio:
+        return False
+    return not nuovo
+
+
 def gestisci_webhook(
     intestazioni: Mapping[str, str] | Any,
     corpo: bytes,
@@ -58,7 +70,13 @@ def gestisci_webhook(
         return Risposta(400, {"ok": False, "errore": "update non valido"})
 
     try:
-        crea_bot().gestisci_update(update)
+        bot = crea_bot()
+        if gia_ricevuto(bot, update.get("update_id")):
+            # Telegram lo rimanda perché la volta prima ci abbiamo messo troppo: lo saltiamo,
+            # altrimenti resterebbe in coda all'infinito e bloccherebbe tutti i messaggi dopo.
+            log.warning("Update %s già ricevuto: saltato", update.get("update_id"))
+            return Risposta(200, {"ok": True, "gia_ricevuto": True})
+        bot.gestisci_update(update)
     except Exception:
         # Rispondiamo comunque 200: con un errore Telegram rimanderebbe lo stesso update
         # all'infinito. L'errore resta nei log di Vercel.
@@ -71,7 +89,7 @@ LAVORI: dict[str, Callable[[Azdora], object]] = {
     "mattino": lambda bot: bot.controlla_mattino(anche_senza_memoria=True),
     # Subito e a tutti: per provare (workflow "Prova riepilogo").
     "mattino-subito": Azdora.invia_riepilogo_mattutino,
-    "controlli": Azdora.controlli,  # allerte + notizie, ogni 15 minuti
+    "controlli": Azdora.controlli,  # promemoria, allerte, notizie, salute… ogni 15 minuti
     "notizie": Azdora.controlla_notizie,
     "allerte": Azdora.controlla_allerte,
 }

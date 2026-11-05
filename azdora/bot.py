@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
@@ -110,6 +111,7 @@ COMANDI: tuple[tuple[str, str], ...] = (
     ("mondo", "Le principali notizie dal mondo"),
     ("orari", "Quando ti scrivo: mattino, sera, notizie, silenzio"),
     ("telefono", "Posizione automatica dal telefono"),
+    ("stato", "Come sto: versione e salute del bot"),
     ("budget", "Budget mensile: /budget 800 o /budget auto 150"),
     ("conti", "Nel gruppo: chi deve quanto a chi"),
     ("pareggio", "Nel gruppo: siamo pari, si riparte da zero"),
@@ -143,6 +145,7 @@ NOTIZIE_NEL_RIASSUNTO = 10
 PRINCIPALI_IN_CODA = 3
 PRINCIPALI_AL_MATTINO = 2
 PRINCIPALI_A_RICHIESTA = 8
+ERRORE_RECENTE_S = 3600  # errori di Telegram dell'ultima ora: c'è da riparare
 PAUSA_AVVISI_S = 4 * 3600  # lo stesso avviso meteo non prima di 4 ore
 # Come li chiamano tutti in Romagna → il nome vero, per cercarli.
 SOPRANNOMI = {
@@ -256,6 +259,7 @@ class Azdora:
             "mondo": self._mondo,
             "orari": self._orari,
             "telefono": self._telefono,
+            "stato": self._stato,
             "budget": self._budget,
             "conti": self._conti,
             "pareggio": self._pareggio,
@@ -1042,6 +1046,7 @@ class Azdora:
     def controlli(self) -> None:
         """Il giro di controlli periodico: promemoria, allerte, notizie e (alle 20) la sera."""
         for controllo in (
+            self.controlla_salute,
             self.controlla_promemoria,
             self.controlla_mattino,
             self.controlla_allerte,
@@ -1595,3 +1600,61 @@ class Azdora:
         assert self.notizie is not None
         trovate = self.notizie.notizie_per(zona.comune, zona.lat, zona.lon, adesso)
         return self._mai_viste(chat_id, modulo_notizie.senza_doppioni(trovate))
+
+    # --- Salute: si ripara da solo --------------------------------------------------------
+
+    def _info_webhook(self) -> dict[str, Any] | None:
+        info = getattr(self.messaggero, "info_webhook", None)
+        if info is None:
+            return None
+        try:
+            return info()
+        except ErroreTelegram as errore:
+            log.warning("Stato del webhook non disponibile: %s", errore)
+            return None
+
+    def controlla_salute(self) -> bool:
+        """Se Telegram ha messaggi bloccati per errori recenti, svuota la coda e avvisa.
+
+        Succede se un messaggio ci ha messo troppo: Telegram lo rimanderebbe all'infinito.
+        Restituisce ``True`` se ha dovuto riparare qualcosa.
+        """
+        info = self._info_webhook()
+        if not info or not info.get("url") or not self.impostazioni.segreto_webhook:
+            return False
+        in_coda = int(info.get("pending_update_count") or 0)
+        errore_ts = info.get("last_error_date")
+        adesso = self.orologio()
+        recente = errore_ts and adesso.timestamp() - float(errore_ts) < ERRORE_RECENTE_S
+        if in_coda == 0 or not recente:
+            return False
+        imposta = getattr(self.messaggero, "imposta_webhook", None)
+        if imposta is None:
+            return False
+        imposta(info["url"], self.impostazioni.segreto_webhook)  # svuota la coda
+        log.warning("Coda di Telegram svuotata: %s update bloccati", in_coda)
+        padrone = self.impostazioni.chat_personale
+        if padrone is not None:
+            with contextlib.suppress(ErroreTelegram):
+                self.messaggero.invia_messaggio(padrone, messaggi.riparato(in_coda))
+        return True
+
+    def _stato(self, chat: Chat, comando: Comando) -> None:
+        info = self._info_webhook() or {}
+        righe = ["🩺 <b>Come sto</b>", ""]
+        versione = os.environ.get("VERCEL_GIT_COMMIT_SHA", "")[:7] or "locale"
+        righe.append(f"🏷️ Versione: <code>{versione}</code>")
+        righe.append(
+            "🧠 Memoria (Upstash): " + ("✅ collegata" if self.archivio.persistente else "⚠️ spenta")
+        )
+        if info:
+            in_coda = int(info.get("pending_update_count") or 0)
+            righe.append(f"📨 Messaggi in coda su Telegram: {in_coda}")
+            if errore := info.get("last_error_message"):
+                quando = datetime.fromtimestamp(
+                    float(info.get("last_error_date") or 0), FUSO_ORARIO
+                )
+                righe.append(f"⚠️ Ultimo errore: {escape(errore)} ({quando:%d/%m %H:%M})")
+            else:
+                righe.append("✅ Nessun errore recente")
+        self.messaggero.invia_messaggio(chat.id, "\n".join(righe))

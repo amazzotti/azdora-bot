@@ -13,6 +13,7 @@ import hashlib
 import logging
 import re
 from collections.abc import Callable, Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -422,6 +423,17 @@ class LettoreNotizie:
         # Durante un giro di controlli per più persone ogni feed si scarica una volta sola.
         self._gia_scaricati: dict[str, list[Notizia]] = {}
 
+    def _scarica_in_parallelo(self, fonti: Sequence[Fonte]) -> None:
+        """Scarica insieme i feed che mancano: 15 giornali in 1-2 secondi invece di 15."""
+        mancanti = list({f.url: f for f in fonti if f.url not in self._gia_scaricati}.values())
+        if len(mancanti) < 2:
+            return
+        with ThreadPoolExecutor(max_workers=8) as gruppo:
+            for fonte, notizie in zip(
+                mancanti, gruppo.map(self._scarica_davvero, mancanti), strict=True
+            ):
+                self._gia_scaricati[fonte.url] = notizie
+
     def _scarica(self, fonte: Fonte) -> list[Notizia]:
         if fonte.url not in self._gia_scaricati:
             self._gia_scaricati[fonte.url] = self._scarica_davvero(fonte)
@@ -463,6 +475,7 @@ class LettoreNotizie:
     def notizie_per(self, comune: str, lat: float, lon: float, adesso: datetime) -> list[Notizia]:
         trovate: list[Notizia] = []
         if in_zona(lat, lon):
+            self._scarica_in_parallelo(self._fonti_riviera)
             for fonte in self._fonti_riviera:
                 trovate += [n for n in self._scarica(fonte) if parla_di(n, comune)]
         # Google cerca anche dentro gli articoli e pesca roba lontana: si tiene solo ciò
@@ -589,6 +602,7 @@ def formatta_per_citta(
 
 
 def _tutte_di_oggi(lettore: LettoreNotizie, adesso: datetime) -> list[Notizia]:
+    lettore._scarica_in_parallelo(lettore._fonti_riviera)
     tutte = [n for fonte in lettore._fonti_riviera for n in lettore._scarica(fonte)]
     return ordina(senza_doppioni(n for n in del_giorno(tutte, adesso) if not e_spazzatura(n)))
 
