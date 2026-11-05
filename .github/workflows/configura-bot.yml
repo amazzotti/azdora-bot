@@ -1,0 +1,33 @@
+# Collega il bot al webhook su Vercel e aggiorna il menu dei comandi.
+# Si lancia a mano: Actions → "Configura bot" → Run workflow.
+name: Configura bot
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Indirizzo del progetto Vercel (es. https://azdora-bot.vercel.app)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  configura:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -e .
+
+      - name: Imposta webhook e comandi
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          # L'input passa da una variabile d'ambiente, non dentro lo script: evita injection.
+          URL_VERCEL: ${{ inputs.url }}
+        run: python -m azdora.configura --url "$URL_VERCEL"
