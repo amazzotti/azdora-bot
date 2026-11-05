@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -33,36 +33,62 @@ log = logging.getLogger(__name__)
 class Fonte:
     nome: str
     url: str
-    # Se il feed del giornale rifiuta i programmi automatici, i suoi articoli si prendono
-    # da Google News, che li pubblica con i link al sito originale.
-    riserva: str | None = None
+    area: str = "Rimini"  # Cesena, Rimini o Pesaro: serve a dare spazio a ogni zona
 
 
 def url_google_news_sito(dominio: str) -> str:
+    """Gli articoli di un giornale presi da Google News, con i link al sito originale.
+
+    Si usa per i giornali che rifiutano i programmi automatici sul loro feed: il bot non
+    finge di essere un browser, chiede a Google News che li pubblica legittimamente.
+    """
     domanda = quote_plus(f"site:{dominio} when:1d")
     return f"https://news.google.com/rss/search?q={domanda}&hl=it&gl=IT&ceid=IT:it"
 
 
-FONTI_RIVIERA: tuple[Fonte, ...] = (
-    Fonte(
-        "Rimini Today",
-        "https://www.riminitoday.it/rss",
-        riserva=url_google_news_sito("riminitoday.it"),
-    ),
-    Fonte("Altarimini", "https://www.altarimini.it/feed/"),
-    Fonte("Chiamami Città", "https://www.chiamamicitta.it/feed/"),
-    Fonte("il Resto del Carlino", "https://www.ilrestodelcarlino.it/rimini/rss"),
+# I giornali da Cesena a Pesaro.
+FONTI_ZONA: tuple[Fonte, ...] = (
+    # Cesena e Cesenatico
+    Fonte("il Resto del Carlino Cesena", "https://www.ilrestodelcarlino.it/cesena/rss", "Cesena"),
+    Fonte("Cesena Notizie", "https://www.cesenanotizie.net/feed/", "Cesena"),
+    Fonte("Cesena Today", url_google_news_sito("cesenatoday.it"), "Cesena"),
+    # Rimini, Riccione e dintorni
+    Fonte("Rimini Today", url_google_news_sito("riminitoday.it"), "Rimini"),
+    Fonte("Altarimini", "https://www.altarimini.it/feed/", "Rimini"),
+    Fonte("Chiamami Città", "https://www.chiamamicitta.it/feed/", "Rimini"),
+    Fonte("il Resto del Carlino Rimini", "https://www.ilrestodelcarlino.it/rimini/rss", "Rimini"),
+    Fonte("NewsRimini", url_google_news_sito("newsrimini.it"), "Rimini"),
+    # Pesaro, Gabicce e dintorni
+    Fonte("il Resto del Carlino Pesaro", "https://www.ilrestodelcarlino.it/pesaro/rss", "Pesaro"),
+    Fonte("Pesaro Notizie", "https://www.pesaronotizie.com/feed/", "Pesaro"),
+    Fonte("Corriere Adriatico Pesaro", "https://www.corriereadriatico.it/rss/pesaro.xml", "Pesaro"),
 )
-# I giornali della Riviera si leggono solo se la zona è entro questa distanza da Rimini.
-RIMINI = (44.0594, 12.5683)
-RAGGIO_RIVIERA_KM = 40
+FONTI_RIVIERA = FONTI_ZONA  # nome storico
+AREA_DELLA_FONTE = {f.nome: f.area for f in FONTI_ZONA}
+
+# I giornali locali si leggono se sei entro questo raggio da Cesena, Rimini o Pesaro.
+CENTRI_ZONA = {
+    "Cesena": (44.1391, 12.2431),
+    "Rimini": (44.0594, 12.5683),
+    "Pesaro": (43.9098, 12.9131),
+}
+RAGGIO_ZONA_KM = 30
+
+
+def in_zona(lat: float, lon: float) -> bool:
+    """Sei tra Cesena e Pesaro (o lì vicino)?"""
+    return any(distanza_km(lat, lon, *centro) <= RAGGIO_ZONA_KM for centro in CENTRI_ZONA.values())
+
 
 MASSIMO_ETA = timedelta(hours=36)
 NOTIZIE_DEL_GIORNO = 10
-MASSIMO_SUL_COMUNE = 6
+MASSIMO_SUL_COMUNE = 4
 MINIMO_NOTIZIE_GIORNO = 5
 # Google News a volte pesca siti di scommesse e simili: non sono notizie.
 _SPAZZATURA = re.compile(r"scommess|pronostic|betting|casin[oò]", re.IGNORECASE)
+_PAGINA_ELENCO = re.compile(
+    r"^(notizie su|ultim['’]ora|ultime notizie|tutte le notizie|news su)(\s|$)", re.IGNORECASE
+)
 LUNGHEZZA_SOMMARIO = 220
 _TAG_HTML = re.compile(r"<[^>]+>")
 _SPAZI = re.compile(r"\s+")
@@ -147,7 +173,10 @@ def recenti(notizie: Iterable[Notizia], adesso: datetime) -> list[Notizia]:
 
 
 def e_spazzatura(notizia: Notizia) -> bool:
-    return bool(_SPAZZATURA.search(notizia.fonte) or _SPAZZATURA.search(notizia.titolo))
+    """Scommesse e pagine elenco ("Ultim'ora Cesena", "Notizie su …"): non sono notizie."""
+    if _SPAZZATURA.search(notizia.fonte) or _SPAZZATURA.search(notizia.titolo):
+        return True
+    return bool(_PAGINA_ELENCO.match(notizia.titolo))
 
 
 def senza_doppioni(notizie: Iterable[Notizia]) -> list[Notizia]:
@@ -188,11 +217,15 @@ def del_giorno(notizie: Iterable[Notizia], adesso: datetime) -> list[Notizia]:
     return [n for n in tutte if adesso - n.data <= timedelta(hours=24)]
 
 
-def alternate(notizie: Sequence[Notizia], quante: int) -> list[Notizia]:
-    """Sceglie le più recenti alternando i giornali, così compaiono tutti; poi le ordina."""
+def alternate(
+    notizie: Sequence[Notizia],
+    quante: int,
+    gruppo: Callable[[Notizia], str] = lambda n: n.fonte,
+) -> list[Notizia]:
+    """Sceglie le più recenti alternando i gruppi (giornali o zone); poi le ordina."""
     per_fonte: dict[str, list[Notizia]] = {}
     for n in ordina(notizie):
-        per_fonte.setdefault(n.fonte, []).append(n)
+        per_fonte.setdefault(gruppo(n), []).append(n)
     scelte: list[Notizia] = []
     while len(scelte) < quante and any(per_fonte.values()):
         for code in per_fonte.values():
@@ -223,12 +256,13 @@ def formatta_breve(notizie: Sequence[Notizia], titolo: str) -> str:
 
 URL_EVENTI_GOOGLE = (
     "https://news.google.com/rss/search?q=(sagra+OR+festa+OR+eventi)+"
-    "(Rimini+OR+Riccione+OR+Romagna)+weekend+when:7d&hl=it&gl=IT&ceid=IT:it"
+    "(Rimini+OR+Riccione+OR+Cesena+OR+Pesaro+OR+Romagna)+weekend+when:7d&hl=it&gl=IT&ceid=IT:it"
 )
 URL_ALTARIMINI = "https://www.altarimini.it/feed/"
 _RIVIERA = re.compile(
     r"rimini|riccione|romagn|cattolica|misano|bellaria|santarcangelo|verucchio|san leo|"
-    r"gradara|san marino|cesena|forl[iì]|ravenna|cervia|valmarecchia|valconca|pesaro",
+    r"gradara|gabicce|san marino|cesena|forl[iì]|ravenna|cervia|valmarecchia|valconca|"
+    r"pesaro|fano|urbino",
     re.IGNORECASE,
 )
 
@@ -271,13 +305,11 @@ class LettoreNotizie:
         return self._gia_scaricati[fonte.url]
 
     def _scarica_davvero(self, fonte: Fonte) -> list[Notizia]:
-        notizie = self._leggi(fonte.url, fonte.nome)
-        if notizie is None and fonte.riserva:
-            log.info("Feed %s non disponibile: uso Google News", fonte.nome)
-            notizie = self._leggi(fonte.riserva, fonte.nome)
+        notizie = self._leggi(fonte.url, fonte.nome) or []
+        if fonte.url.startswith("https://news.google.com/") and fonte.nome != "Google News":
             # Da Google arrivano con il nome scritto dal giornale ("RiminiToday"): uniformiamo.
-            notizie = [replace(n, fonte=fonte.nome) for n in notizie or []]
-        return notizie or []
+            notizie = [replace(n, fonte=fonte.nome) for n in notizie]
+        return notizie
 
     def _leggi(self, url: str, nome: str) -> list[Notizia] | None:
         """Scarica e legge un feed; ``None`` se il sito non risponde o rifiuta la richiesta."""
@@ -295,14 +327,17 @@ class LettoreNotizie:
         pulite = senza_doppioni(n for n in del_giorno(tutte, adesso) if not e_spazzatura(n))
         # Al massimo 6 sul tuo comune: le altre 4 raccontano il resto della Riviera.
         vicine = ordina(n for n in pulite if parla_di(n, comune))[:MASSIMO_SUL_COMUNE]
+        # Le altre si dividono tra Cesena, Rimini e Pesaro, poi tra i giornali.
         altre = alternate(
-            [n for n in pulite if not parla_di(n, comune)], NOTIZIE_DEL_GIORNO - len(vicine)
+            [n for n in pulite if not parla_di(n, comune)],
+            NOTIZIE_DEL_GIORNO - len(vicine),
+            gruppo=lambda n: AREA_DELLA_FONTE.get(n.fonte, n.fonte),
         )
         return prima_quelle_di([*vicine, *altre], comune)
 
     def notizie_per(self, comune: str, lat: float, lon: float, adesso: datetime) -> list[Notizia]:
         trovate: list[Notizia] = []
-        if distanza_km(lat, lon, *RIMINI) <= RAGGIO_RIVIERA_KM:
+        if in_zona(lat, lon):
             for fonte in self._fonti_riviera:
                 trovate += [n for n in self._scarica(fonte) if parla_di(n, comune)]
         trovate += self._scarica(Fonte("Google News", url_google_news(comune)))

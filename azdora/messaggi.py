@@ -284,7 +284,7 @@ def titolo_notizie(etichetta: str, nuove: bool) -> str:
 
 
 def titolo_notizie_riviera(comune: str) -> str:
-    return f"🗞️ <b>Le notizie di oggi in Riviera</b>\n<i>📍 = parla di {escape(comune)}</i>"
+    return f"🗞️ <b>Le notizie di oggi, da Cesena a Pesaro</b>\n<i>📍 = parla di {escape(comune)}</i>"
 
 
 def nessuna_notizia(etichetta: str) -> str:

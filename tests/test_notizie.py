@@ -104,6 +104,9 @@ def test_spazzatura():
     assert e_spazzatura(Notizia("Pronostico Parma-Bologna", "https://a", "x"))
     assert e_spazzatura(Notizia("Titolo", "https://a", "Siti scommesse"))
     assert not e_spazzatura(Notizia("Sagra della piadina", "https://a", "Rimini Today"))
+    assert e_spazzatura(Notizia("Ultim'ora Cesena", "https://a", "Cesena Today"))
+    assert e_spazzatura(Notizia("Notizie su riqualificazione urbana", "https://a", "x"))
+    assert not e_spazzatura(Notizia("Rimini, doppio esame al Neri", "https://a", "Carlino"))
 
 
 def test_formatta_con_link_sicuri():
@@ -120,23 +123,68 @@ def test_url_google_news():
     assert "hl=it" in url
 
 
-@respx.mock
-def test_lettore_in_riviera_usa_giornali_locali_e_google():
-    for fonte, file in zip(
-        FONTI_RIVIERA,
-        ["rss_riminitoday.xml", "rss_altarimini.xml", "rss_chiamamicitta.xml", "rss_carlino.xml"],
-        strict=True,
-    ):
+FILE_PER_FONTE = {
+    "il Resto del Carlino Cesena": "rss_carlino_cesena.xml",
+    "Cesena Notizie": "rss_cesenanotizie.xml",
+    "Altarimini": "rss_altarimini.xml",
+    "Chiamami Città": "rss_chiamamicitta.xml",
+    "il Resto del Carlino Rimini": "rss_carlino.xml",
+    "il Resto del Carlino Pesaro": "rss_carlino_pesaro.xml",
+    "Pesaro Notizie": "rss_pesaronotizie.xml",
+    "Corriere Adriatico Pesaro": "rss_corriereadriatico_pesaro.xml",
+}
+
+
+def _finti_giornali():
+    """Ogni giornale risponde con il suo feed salvato; quelli via Google con Google News."""
+    for fonte in FONTI_RIVIERA:
+        file = FILE_PER_FONTE.get(fonte.nome, "rss_googlenews.xml")
         respx.get(fonte.url).mock(return_value=httpx.Response(200, content=_feed(file)))
-    google = respx.get(url__startswith="https://news.google.com/").mock(
+    return respx.get(url__startswith="https://news.google.com/rss/search?q=%22").mock(
         return_value=httpx.Response(200, content=_feed("rss_googlenews.xml"))
     )
+
+
+def test_fonti_da_cesena_a_pesaro():
+    from azdora.notizie import AREA_DELLA_FONTE
+
+    assert set(AREA_DELLA_FONTE.values()) == {"Cesena", "Rimini", "Pesaro"}
+    assert len({f.url for f in FONTI_RIVIERA}) == len(FONTI_RIVIERA)
+    # I giornali che rifiutano i programmi automatici passano da Google News.
+    bloccati = {"Rimini Today", "Cesena Today", "NewsRimini"}
+    for fonte in FONTI_RIVIERA:
+        assert fonte.url.startswith("https://news.google.com/") == (fonte.nome in bloccati)
+
+
+@pytest.mark.parametrize(
+    ("lat", "lon", "dentro"),
+    [
+        (44.139, 12.243, True),  # Cesena
+        (44.200, 12.400, True),  # Cesenatico
+        (43.999, 12.657, True),  # Riccione
+        (43.910, 12.913, True),  # Pesaro
+        (43.840, 13.020, True),  # Fano
+        (44.494, 11.343, False),  # Bologna
+        (43.616, 13.519, False),  # Ancona
+    ],
+)
+def test_in_zona(lat, lon, dentro):
+    from azdora.notizie import in_zona
+
+    assert in_zona(lat, lon) is dentro
+
+
+@respx.mock
+def test_lettore_in_zona_usa_giornali_locali_e_google():
+    google = _finti_giornali()
     with httpx.Client() as http:
         notizie = LettoreNotizie(http).notizie_per("Riccione", *RICCIONE, ADESSO)
     assert google.called
     fonti = {n.fonte for n in notizie}
     assert "Altarimini" in fonti  # dai giornali locali, filtrate su Riccione
-    assert "Newsrimini" in fonti  # da Google News
+    # Da Google News (ricerca per comune o giornali che passano da Google); i doppioni
+    # tra le due strade vengono uniti, quindi basta che ce ne sia almeno uno.
+    assert fonti & {"Newsrimini", "Cesena Today", "Rimini Today", "NewsRimini"}
     assert all(
         parla_di(n, "Riccione") for n in notizie if n.fonte in {f.nome for f in FONTI_RIVIERA}
     )
@@ -232,12 +280,11 @@ def test_del_giorno_con_poche_notizie_usa_le_ultime_24_ore():
 
 
 @respx.mock
-def test_rimini_today_bloccato_passa_da_google_news():
+def test_giornale_via_google_prende_il_suo_nome():
     from azdora.notizie import FONTI_RIVIERA
 
-    rimini_today = FONTI_RIVIERA[0]
-    respx.get(rimini_today.url).mock(return_value=httpx.Response(403))
-    respx.get(rimini_today.riserva).mock(
+    rimini_today = next(f for f in FONTI_RIVIERA if f.nome == "Rimini Today")
+    respx.get(rimini_today.url).mock(
         return_value=httpx.Response(200, content=_feed("rss_googlenews.xml"))
     )
     with httpx.Client() as http:
@@ -246,15 +293,15 @@ def test_rimini_today_bloccato_passa_da_google_news():
 
 
 @respx.mock
-def test_del_giorno_in_riviera_mescola_i_giornali():
-    for fonte, file in zip(
-        FONTI_RIVIERA,
-        ["rss_riminitoday.xml", "rss_altarimini.xml", "rss_chiamamicitta.xml", "rss_carlino.xml"],
-        strict=True,
-    ):
-        respx.get(fonte.url).mock(return_value=httpx.Response(200, content=_feed(file)))
+def test_del_giorno_divide_tra_cesena_rimini_e_pesaro():
+    from azdora.notizie import AREA_DELLA_FONTE
+
+    _finti_giornali()
     with httpx.Client() as http:
         notizie = LettoreNotizie(http).del_giorno_in_riviera("Riccione", ADESSO)
     assert 5 <= len(notizie) <= 10
-    assert len({n.fonte for n in notizie}) >= 3
     assert parla_di(notizie[0], "Riccione")
+    sul_comune = [n for n in notizie if parla_di(n, "Riccione")]
+    assert len(sul_comune) <= 4
+    aree = {AREA_DELLA_FONTE.get(n.fonte) for n in notizie if not parla_di(n, "Riccione")}
+    assert {"Cesena", "Pesaro"} <= aree

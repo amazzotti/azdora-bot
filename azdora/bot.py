@@ -93,7 +93,6 @@ DISTANZA_DA_CASA_KM = 15
 MASSIMO_NOTIZIE = 5
 MASSIMO_NOTIZIE_ZONA_NUOVA = 3
 NOTIZIE_A_RICHIESTA = 10  # con /notizie se ne vedono di più che negli avvisi automatici
-RAGGIO_RIVIERA_KM = modulo_notizie.RAGGIO_RIVIERA_KM
 RICORDO_NOTIZIE_S = 3 * 24 * 3600
 RICORDO_ZONA_S = 30 * 24 * 3600
 
@@ -486,9 +485,8 @@ class Azdora:
             return
         comune, lat, lon = zona
         adesso = self.orologio()
-        in_riviera = distanza_km(lat, lon, *modulo_notizie.RIMINI) <= RAGGIO_RIVIERA_KM
-        if not comando.argomenti and in_riviera:
-            # In Riviera: le notizie del giorno da tutti i giornali, il tuo comune in cima.
+        if not comando.argomenti and modulo_notizie.in_zona(lat, lon):
+            # Tra Cesena e Pesaro: le notizie del giorno da tutti i giornali, il comune in cima.
             del_giorno = self.notizie.del_giorno_in_riviera(comune, adesso)
             if del_giorno:
                 testo = modulo_notizie.formatta(
