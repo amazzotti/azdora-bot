@@ -9,6 +9,7 @@ from azdora.notizie import (
     Fonte,
     LettoreNotizie,
     Notizia,
+    e_in_riviera,
     e_spazzatura,
     formatta,
     leggi_feed,
@@ -166,3 +167,28 @@ def test_un_giornale_giu_non_ferma_gli_altri():
     with httpx.Client() as http:
         notizie = LettoreNotizie(http, fonti).notizie_per("Riccione", *RICCIONE, ADESSO)
     assert notizie and all(n.fonte == "Su" for n in notizie)
+
+
+@respx.mock
+def test_eventi_dalla_riviera():
+    from azdora.notizie import URL_ALTARIMINI, URL_EVENTI_GOOGLE
+
+    respx.get(URL_ALTARIMINI).mock(
+        return_value=httpx.Response(200, content=_feed("rss_altarimini.xml"))
+    )
+    respx.get(URL_EVENTI_GOOGLE).mock(
+        return_value=httpx.Response(200, content=_feed("rss_googlenews.xml"))
+    )
+    with httpx.Client() as http:
+        eventi = LettoreNotizie(http).eventi(ADESSO)
+    altarimini = [n for n in eventi if n.fonte == "Altarimini"]
+    assert altarimini and all("Eventi" in n.categorie for n in altarimini)
+    assert all(e_in_riviera(n) for n in eventi)
+
+
+def test_categorie_lette_dal_feed():
+    notizie = leggi_feed(_feed("rss_altarimini.xml"), "Altarimini")
+    assert notizie[0].categorie == ("Riccione", "Eventi")
+    assert parla_di(
+        Notizia("Titolo", "https://a", "x", categorie=("Misano Adriatico",)), "misano adriatico"
+    )

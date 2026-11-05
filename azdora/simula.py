@@ -10,6 +10,8 @@ Esempi::
     python -m azdora.simula posizione:43.978,12.697   # come se mandassi la posizione
     python -m azdora.simula /notizie /allerte         # notizie e allerte della zona
     python -m azdora.simula posizione:44.49,11.34 controlli   # i controlli ogni 15 minuti
+    python -m azdora.simula "/scadenza 7/11 bollo 180€ annuale" /scadenze tocca:pagato:1
+    python -m azdora.simula "/spesa 45 benzina" /mese "/aggiungi latte, pane" /lista /weekend
     python -m azdora.simula mattino                   # il messaggio delle 7
     python -m azdora.simula --offline /domani         # senza internet
 """
@@ -39,11 +41,19 @@ from azdora.meteo.openmeteo import (
     leggi_mare,
     leggi_previsioni,
 )
-from azdora.notizie import LettoreNotizie, Notizia, leggi_feed, ordina, parla_di
+from azdora.notizie import (
+    LettoreNotizie,
+    Notizia,
+    e_un_evento,
+    leggi_feed,
+    ordina,
+    parla_di,
+)
 
 CHAT_SIMULATA = 1
 CARTELLA_ESEMPI = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
 PREFISSO_POSIZIONE = "posizione:"
+PREFISSO_PULSANTE = "tocca:"
 _TAG_HTML = re.compile(r"<[^>]+>")
 
 
@@ -67,11 +77,28 @@ class Console:
     ) -> None:
         print("─" * 60)
         print(testo if self.html else html_in_testo(testo))
-        for riga in (tastiera or {}).get("keyboard", []):
+        tasti = (tastiera or {}).get("keyboard") or (tastiera or {}).get("inline_keyboard") or []
+        for riga in tasti:
             print("   " + "  ".join(f"[ {pulsante['text']} ]" for pulsante in riga))
 
     def esci_da_chat(self, chat_id: int) -> None:
         print(f"(il bot esce dalla chat {chat_id})")
+
+    def rispondi_pulsante(self, id_pulsante: str, testo: str | None = None) -> None:
+        if testo:
+            print(f"(avviso: {testo})")
+
+    def modifica_messaggio(
+        self, chat_id: int, id_messaggio: int, testo: str, tastiera: dict[str, Any] | None = None
+    ) -> None:
+        print("(messaggio aggiornato)")
+        self.invia_messaggio(chat_id, testo, tastiera)
+
+    def invia_documento(
+        self, chat_id: int, nome_file: str, contenuto: bytes, didascalia: str = ""
+    ) -> None:
+        print("─" * 60)
+        print(f"📎 {nome_file} ({len(contenuto)} byte) — {html_in_testo(didascalia)}")
 
 
 class FonteMeteoDaFile:
@@ -127,6 +154,9 @@ class NotizieDaFile:
     def notizie_per(self, comune: str, lat: float, lon: float, adesso: datetime) -> list[Notizia]:
         return ordina(n for n in self._notizie if parla_di(n, comune))
 
+    def eventi(self, adesso: datetime) -> list[Notizia]:
+        return ordina(n for n in self._notizie if e_un_evento(n))
+
 
 class AllerteDaFile:
     def __init__(self, cartella: Path = CARTELLA_ESEMPI) -> None:
@@ -143,6 +173,17 @@ def update_simulato(testo: str) -> dict[str, Any]:
         "chat": {"id": CHAT_SIMULATA, "type": "private"},
         "from": {"id": CHAT_SIMULATA, "first_name": "Tu"},
     }
+    if testo.startswith(PREFISSO_PULSANTE):
+        # Tocco su un pulsante inline, es. "tocca:pagato:1".
+        return {
+            "update_id": 0,
+            "callback_query": {
+                "id": "simulato",
+                "from": messaggio["from"],
+                "message": {**messaggio, "message_id": 1},
+                "data": testo.removeprefix(PREFISSO_PULSANTE),
+            },
+        }
     if testo.startswith(PREFISSO_POSIZIONE):
         lat, _, lon = testo.removeprefix(PREFISSO_POSIZIONE).partition(",")
         messaggio["location"] = {"latitude": float(lat), "longitude": float(lon)}

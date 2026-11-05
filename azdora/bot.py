@@ -10,16 +10,28 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from html import escape
 from typing import Any
 
 from azdora import allerte as modulo_allerte
+from azdora import lista as modulo_lista
 from azdora import messaggi
 from azdora import notizie as modulo_notizie
+from azdora import scadenze as modulo_scadenze
+from azdora import spese as modulo_spese
+from azdora import weekend as modulo_weekend
 from azdora.allerte import FonteAllerte
 from azdora.archivio import Archivio, ArchivioMemoria, ErroreArchivio
-from azdora.config import FUSO_ORARIO, LOCALITA, Impostazioni, Localita, trova_localita
+from azdora.config import (
+    FUSO_ORARIO,
+    LOCALITA,
+    RICCIONE,
+    Impostazioni,
+    Localita,
+    trova_localita,
+)
+from azdora.lista import Lista, leggi_voci
 from azdora.luoghi import CercaLuoghi, Luogo, distanza_km, localita_qui
 from azdora.meteo.openmeteo import ErroreMeteo, FonteMeteo, PrevisioniMare
 from azdora.notizie import FonteNotizie, Notizia
@@ -36,6 +48,9 @@ from azdora.riepilogo import (
     riepilogo_oggi,
     riepilogo_posizione,
 )
+from azdora.scadenze import RegistroScadenze, leggi_scadenza
+from azdora.soldi import aggiungi_mesi, euro, leggi_mese
+from azdora.spese import RegistroSpese, leggi_spesa
 from azdora.telegram import Messaggero
 
 log = logging.getLogger(__name__)
@@ -51,6 +66,16 @@ COMANDI: tuple[tuple[str, str], ...] = (
     ("notizie", "Ultime notizie della tua zona"),
     ("allerte", "Allerte meteo della tua zona"),
     ("dove", "Dove credo che tu sia"),
+    ("scadenze", "Le tue scadenze (bollo, assicurazione…)"),
+    ("scadenza", "Segna una scadenza: /scadenza 31/01 bollo 180€ annuale"),
+    ("spesa", "Segna una spesa: /spesa 45 benzina"),
+    ("mese", "Riepilogo delle spese del mese"),
+    ("spese", "Ultime spese segnate"),
+    ("annulla", "Cancella l'ultima spesa segnata"),
+    ("esporta", "Scarica le spese dell'anno in CSV"),
+    ("lista", "La lista condivisa delle cose da fare"),
+    ("aggiungi", "Aggiungi alla lista: /aggiungi latte, pane"),
+    ("weekend", "Meteo del weekend, gite e sagre"),
     ("dimentica", "Cancella la posizione che ricordo"),
     ("id", "Mostra l'id di questa chat"),
     ("aiuto", "Cosa so fare"),
@@ -85,6 +110,7 @@ class Comando:
     nome: str
     argomenti: tuple[str, ...]
     destinatario: str | None = None
+    mittente: str = ""  # nome di chi scrive, utile nel gruppo
 
     @property
     def testo_argomenti(self) -> str:
@@ -143,6 +169,17 @@ class Azdora:
             "dove": self._dove,
             "dimentica": self._dimentica,
             "id": self._id,
+            "scadenza": self._scadenza,
+            "scadenze": self._scadenze,
+            "spesa": self._spesa,
+            "spese": self._spese,
+            "mese": self._mese,
+            "annulla": self._annulla,
+            "esporta": self._esporta,
+            "lista": self._lista,
+            "aggiungi": self._aggiungi,
+            "svuota": self._svuota,
+            "weekend": self._weekend,
         }
 
     # --- Ingresso ---------------------------------------------------------------------
@@ -153,6 +190,8 @@ class Azdora:
             self._aggiunto_a_chat(update["my_chat_member"])
         elif "message" in update:
             self._messaggio(update["message"])
+        elif "callback_query" in update:
+            self._pulsante(update["callback_query"])
         elif "edited_message" in update:
             # La posizione in tempo reale arriva come messaggio modificato, più volte.
             self._posizione_aggiornata(update["edited_message"])
@@ -186,6 +225,9 @@ class Azdora:
             return
         chat = Chat(dati_chat["id"], dati_chat.get("type", "private"))
         comando = leggi_comando(messaggio.get("text"))
+        if comando is not None:
+            mittente = (messaggio.get("from") or {}).get("first_name", "")
+            comando = Comando(comando.nome, comando.argomenti, comando.destinatario, mittente)
         posizione = messaggio.get("location")
         if comando is None and posizione is None:
             return  # Testo libero: per ora l'Azdora risponde solo a comandi e posizioni.
@@ -463,7 +505,7 @@ class Azdora:
             return None
 
     def invia_riepilogo_mattutino(self) -> None:
-        """Il messaggio delle 7, spedito alla chat personale."""
+        """Il messaggio delle 7: meteo, poi promemoria delle scadenze e (il 1°) le spese."""
         chat_id = self._chat_personale()
         try:
             testo = self.testo_oggi(saluta=True)
@@ -471,6 +513,222 @@ class Azdora:
             log.error("Riepilogo mattutino senza meteo: %s", errore)
             testo = messaggi.METEO_NON_DISPONIBILE
         self.messaggero.invia_messaggio(chat_id, testo)
+        for chat in sorted(self.impostazioni.chat_autorizzate, reverse=True):
+            try:
+                self.invia_promemoria_scadenze(chat)
+                if self.orologio().day == 1:
+                    self.invia_resoconto_mese_scorso(chat)
+            except ErroreArchivio as errore:
+                log.warning("Promemoria e resoconto saltati per %s: %s", chat, errore)
+
+    # --- Scadenze ---------------------------------------------------------------------
+
+    def _oggi_data(self) -> date:
+        return self.orologio().date()
+
+    def _scadenza(self, chat: Chat, comando: Comando) -> None:
+        nuova = leggi_scadenza(comando.argomenti, self._oggi_data())
+        if nuova is None:
+            self.messaggero.invia_messaggio(chat.id, modulo_scadenze.USO)
+            return
+        scadenza = RegistroScadenze(self.archivio, chat.id).aggiungi(nuova)
+        testo = (
+            f"📅 Segnata: {modulo_scadenze.riga(scadenza, self._oggi_data())}\n"
+            "Ti avviso 30, 7 e 1 giorno prima, e il giorno stesso. /scadenze per vederle tutte."
+        )
+        self.messaggero.invia_messaggio(chat.id, testo)
+
+    def _testo_scadenze(self, chat_id: int) -> tuple[str, dict[str, Any] | None]:
+        tutte = RegistroScadenze(self.archivio, chat_id).tutte()
+        return (
+            modulo_scadenze.elenco(tutte, self._oggi_data()),
+            modulo_scadenze.pulsanti(tutte, con_elimina=True),
+        )
+
+    def _scadenze(self, chat: Chat, comando: Comando) -> None:
+        self.messaggero.invia_messaggio(chat.id, *self._testo_scadenze(chat.id))
+
+    def invia_promemoria_scadenze(self, chat_id: int) -> int:
+        oggi = self._oggi_data()
+        da_dire = modulo_scadenze.da_ricordare(
+            RegistroScadenze(self.archivio, chat_id).tutte(), oggi
+        )
+        if da_dire:
+            self.messaggero.invia_messaggio(
+                chat_id,
+                modulo_scadenze.promemoria(da_dire, oggi),
+                modulo_scadenze.pulsanti([s for s, _ in da_dire], con_elimina=False),
+            )
+        return len(da_dire)
+
+    def _paga(self, chat_id: int, id_scadenza: int) -> str:
+        risultato = RegistroScadenze(self.archivio, chat_id).paga(id_scadenza)
+        if risultato is None:
+            return "Questa scadenza non c'è più"
+        pagata, prossima = risultato
+        if pagata.importo:
+            RegistroSpese(self.archivio, chat_id).aggiungi(
+                self._oggi_data(), pagata.importo, pagata.descrizione
+            )
+        avviso = f"✅ {pagata.descrizione}: pagato"
+        if prossima:
+            avviso += f". Prossima: {prossima.data.day}/{prossima.data.month}/{prossima.data.year}"
+        return avviso
+
+    # --- Spese ------------------------------------------------------------------------
+
+    def _spesa(self, chat: Chat, comando: Comando) -> None:
+        letta = leggi_spesa(comando.argomenti)
+        if letta is None:
+            self.messaggero.invia_messaggio(chat.id, messaggi.USO_SPESA)
+            return
+        importo, descrizione = letta
+        registro = RegistroSpese(self.archivio, chat.id)
+        oggi = self._oggi_data()
+        spesa = registro.aggiungi(oggi, importo, descrizione)
+        mese = modulo_spese.totale(registro.del_mese(oggi))
+        self.messaggero.invia_messaggio(
+            chat.id, messaggi.spesa_segnata(spesa.importo, spesa.categoria, descrizione, mese)
+        )
+
+    def _spese(self, chat: Chat, comando: Comando) -> None:
+        spese = RegistroSpese(self.archivio, chat.id).del_mese(self._oggi_data())
+        self.messaggero.invia_messaggio(chat.id, modulo_spese.elenco(spese))
+
+    def _testo_mese(self, chat_id: int, mese: date) -> str:
+        registro = RegistroSpese(self.archivio, chat_id)
+        precedente = modulo_spese.totale(registro.del_mese(aggiungi_mesi(mese, -1)))
+        return modulo_spese.resoconto(registro.del_mese(mese), mese, precedente or None)
+
+    def _mese(self, chat: Chat, comando: Comando) -> None:
+        oggi = self._oggi_data()
+        mese = leggi_mese(comando.testo_argomenti, oggi) if comando.argomenti else None
+        if comando.argomenti and mese is None:
+            self.messaggero.invia_messaggio(chat.id, messaggi.USO_MESE)
+            return
+        self.messaggero.invia_messaggio(
+            chat.id, self._testo_mese(chat.id, mese or oggi.replace(day=1))
+        )
+
+    def _annulla(self, chat: Chat, comando: Comando) -> None:
+        tolta = RegistroSpese(self.archivio, chat.id).annulla_ultima(self._oggi_data())
+        testo = (
+            messaggi.NIENTE_DA_ANNULLARE
+            if tolta is None
+            else f"↩️ Tolta: {euro(tolta.importo)} · {escape(tolta.descrizione)}"
+        )
+        self.messaggero.invia_messaggio(chat.id, testo)
+
+    def _esporta(self, chat: Chat, comando: Comando) -> None:
+        anno = self._oggi_data().year
+        if comando.argomenti and comando.argomenti[0].isdigit():
+            anno = int(comando.argomenti[0])
+        spese = RegistroSpese(self.archivio, chat.id).dell_anno(anno)
+        if not spese:
+            self.messaggero.invia_messaggio(chat.id, f"💶 Nessuna spesa segnata nel {anno}.")
+            return
+        self.messaggero.invia_documento(
+            chat.id,
+            f"spese-{anno}.csv",
+            modulo_spese.csv_spese(spese),
+            f"💶 Spese del {anno}: {modulo_spese.quante(len(spese))}, "
+            f"{euro(modulo_spese.totale(spese))}",
+        )
+
+    def invia_resoconto_mese_scorso(self, chat_id: int) -> bool:
+        mese = aggiungi_mesi(self._oggi_data().replace(day=1), -1)
+        if not RegistroSpese(self.archivio, chat_id).del_mese(mese):
+            return False
+        self.messaggero.invia_messaggio(chat_id, self._testo_mese(chat_id, mese))
+        return True
+
+    # --- Lista condivisa --------------------------------------------------------------
+
+    def _lista(self, chat: Chat, comando: Comando) -> None:
+        voci = Lista(self.archivio, chat.id).voci()
+        self.messaggero.invia_messaggio(
+            chat.id, modulo_lista.messaggio_lista(voci), modulo_lista.pulsanti_lista(voci)
+        )
+
+    def _aggiungi(self, chat: Chat, comando: Comando) -> None:
+        testi = leggi_voci(comando.testo_argomenti)
+        if not testi:
+            self.messaggero.invia_messaggio(chat.id, messaggi.USO_AGGIUNGI)
+            return
+        lista = Lista(self.archivio, chat.id)
+        lista.aggiungi(testi, comando.mittente if chat.e_un_gruppo else "")
+        voci = lista.voci()
+        self.messaggero.invia_messaggio(
+            chat.id, modulo_lista.messaggio_lista(voci), modulo_lista.pulsanti_lista(voci)
+        )
+
+    def _svuota(self, chat: Chat, comando: Comando) -> None:
+        tolte = Lista(self.archivio, chat.id).togli_fatte()
+        self.messaggero.invia_messaggio(chat.id, messaggi.lista_svuotata(tolte))
+
+    # --- Weekend ----------------------------------------------------------------------
+
+    def _weekend(self, chat: Chat, comando: Comando) -> None:
+        sabato, domenica = modulo_weekend.prossimo_weekend(self._oggi_data())
+        previsioni = self.meteo.previsioni(RICCIONE)
+        giorni = {g.data: g for g in previsioni.giorni}
+        eventi = []
+        if self.notizie is not None:
+            eventi = self.notizie.eventi(self.orologio())
+        testo = modulo_weekend.messaggio_weekend(
+            giorni.get(sabato), giorni.get(domenica), sabato, eventi
+        )
+        self.messaggero.invia_messaggio(chat.id, testo)
+
+    # --- Pulsanti ---------------------------------------------------------------------
+
+    def _pulsante(self, tocco: dict[str, Any]) -> None:
+        """Tocco su un pulsante inline: pagato, elimina, spunta della lista."""
+        id_tocco = str(tocco.get("id", ""))
+        messaggio = tocco.get("message") or {}
+        chat_id = (messaggio.get("chat") or {}).get("id")
+        id_messaggio = messaggio.get("message_id")
+        azione, _, valore = str(tocco.get("data", "")).partition(":")
+        if chat_id is None or not self._e_autorizzata(chat_id):
+            self.messaggero.rispondi_pulsante(id_tocco)
+            return
+        try:
+            avviso = self._esegui_pulsante(chat_id, id_messaggio, azione, valore)
+        except (ErroreArchivio, ValueError) as errore:
+            log.warning("Pulsante %s non riuscito: %s", azione, errore)
+            avviso = "😓 Non ci sono riuscita, riprova"
+        self.messaggero.rispondi_pulsante(id_tocco, avviso)
+
+    def _esegui_pulsante(
+        self, chat_id: int, id_messaggio: int | None, azione: str, valore: str
+    ) -> str | None:
+        if azione in {"pagato", "elimina"}:
+            if azione == "pagato":
+                avviso = self._paga(chat_id, int(valore))
+            else:
+                tolta = RegistroScadenze(self.archivio, chat_id).elimina(int(valore))
+                avviso = f"🗑 Tolta: {tolta.descrizione}" if tolta else None
+            if id_messaggio is not None:
+                self.messaggero.modifica_messaggio(
+                    chat_id, id_messaggio, *self._testo_scadenze(chat_id)
+                )
+            return avviso
+        if azione in {"voce", "lista"}:
+            lista = Lista(self.archivio, chat_id)
+            if azione == "voce":
+                lista.cambia(int(valore))
+            elif valore == "pulisci":
+                lista.togli_fatte()
+            voci = lista.voci()
+            if id_messaggio is not None:
+                self.messaggero.modifica_messaggio(
+                    chat_id,
+                    id_messaggio,
+                    modulo_lista.messaggio_lista(voci),
+                    modulo_lista.pulsanti_lista(voci) or {"inline_keyboard": []},
+                )
+            return None
+        return None
 
     def _chat_personale(self) -> int:
         chat_id = self.impostazioni.chat_personale

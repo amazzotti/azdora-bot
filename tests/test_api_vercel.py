@@ -107,7 +107,7 @@ def test_cron_su_vercel(ambiente, servizi_finti):
             server, "/api/cron?job=mattino", intestazioni={"Authorization": "Bearer segreto-cron"}
         )
         assert (stato, corpo) == (200, {"ok": True, "job": "mattino"})
-        assert "Buongiorno" in json.loads(servizi_finti.calls.last.request.content)["text"]
+        assert "Ale!</b>" in json.loads(servizi_finti.calls.last.request.content)["text"]
 
         stato, _ = _chiama(server, "/api/cron?job=mattino", metodo="POST")
         assert stato == 401

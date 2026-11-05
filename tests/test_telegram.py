@@ -79,7 +79,12 @@ def test_imposta_webhook_con_segreto(telegram):
     telegram.imposta_webhook("https://esempio.vercel.app/api/webhook", "abc")
     inviato = json.loads(rotta.calls.last.request.content)
     assert inviato["secret_token"] == "abc"
-    assert inviato["allowed_updates"] == ["message", "my_chat_member"]
+    assert inviato["allowed_updates"] == [
+        "message",
+        "edited_message",
+        "callback_query",
+        "my_chat_member",
+    ]
 
 
 @respx.mock

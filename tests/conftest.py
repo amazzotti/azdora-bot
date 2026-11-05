@@ -63,6 +63,9 @@ class FintoMessaggero:
     inviati: list[tuple[int, str]] = field(default_factory=list)
     tastiere: list[dict[str, Any] | None] = field(default_factory=list)
     uscite: list[int] = field(default_factory=list)
+    risposte_pulsanti: list[tuple[str, str | None]] = field(default_factory=list)
+    modificati: list[tuple[int, int, str, dict[str, Any] | None]] = field(default_factory=list)
+    documenti: list[tuple[int, str, bytes, str]] = field(default_factory=list)
 
     def invia_messaggio(
         self, chat_id: int, testo: str, tastiera: dict[str, Any] | None = None
@@ -72,6 +75,19 @@ class FintoMessaggero:
 
     def esci_da_chat(self, chat_id: int) -> None:
         self.uscite.append(chat_id)
+
+    def rispondi_pulsante(self, id_pulsante: str, testo: str | None = None) -> None:
+        self.risposte_pulsanti.append((id_pulsante, testo))
+
+    def modifica_messaggio(
+        self, chat_id: int, id_messaggio: int, testo: str, tastiera: dict[str, Any] | None = None
+    ) -> None:
+        self.modificati.append((chat_id, id_messaggio, testo, tastiera))
+
+    def invia_documento(
+        self, chat_id: int, nome_file: str, contenuto: bytes, didascalia: str = ""
+    ) -> None:
+        self.documenti.append((chat_id, nome_file, contenuto, didascalia))
 
     @property
     def ultimo(self) -> str:

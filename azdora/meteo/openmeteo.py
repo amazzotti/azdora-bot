@@ -293,7 +293,7 @@ class FonteMeteo(Protocol):
 class OpenMeteo:
     """Fonte meteo reale basata su Open-Meteo."""
 
-    def __init__(self, http: httpx.Client, giorni: int = 3) -> None:
+    def __init__(self, http: httpx.Client, giorni: int = 7) -> None:
         self._http = http
         self._giorni = giorni
 

@@ -26,13 +26,20 @@ In Romagna l'*azdora* è chi manda avanti la casa: sa che tempo fa, si ricorda l
 | `/notizie [località]` | Ultime notizie della tua zona, con il link: giornali della Riviera e Google News |
 | `/allerte` | Allerte meteo (gialla, arancione, rossa) della regione in cui ti trovi |
 | `/dove` · `/dimentica` | Dove il bot crede che tu sia · cancella la posizione salvata |
+| `/scadenza 31/01 bollo auto 180€ annuale` | Segna una scadenza: data, cosa, importo e ricorrenza (mensile, bimestrale, annuale…) in qualsiasi ordine |
+| `/scadenze` | Tutte le scadenze, con i pulsanti **✅ Pagato** e **🗑**. Se paghi una scadenza ricorrente, si sposta alla volta dopo e l'importo finisce tra le spese |
+| `/spesa 45 benzina` | Segna una spesa; la categoria (🚗 Auto, 🛒 Spesa, 💡 Bollette, 🍕 Fuori…) la indovina il bot |
+| `/mese [mese]` · `/spese` · `/annulla` | Riepilogo del mese per categoria con il confronto col mese prima · ultime spese · togli l'ultima |
+| `/esporta [anno]` | Il file CSV delle spese dell'anno, pronto per Excel |
+| `/aggiungi latte, pane` · `/lista` · `/svuota` | La lista condivisa: si spunta toccando le voci. Nel gruppo di coppia mostra chi ha aggiunto cosa |
+| `/weekend` | Meteo di sabato e domenica, tre idee per un giro (al coperto se piove) e le sagre ed eventi della settimana |
 | `/id` | L'id della chat, da usare nella configurazione |
 | `/aiuto` | L'elenco dei comandi |
 
 Senza località i comandi usano Riccione.
 
 In più, da sola:
-- **ogni mattina alle 7** l'Azdora manda il riepilogo della giornata. Se sei lontano da casa, aggiunge il meteo di dove sei; se ci sono allerte, le mette in fondo;
+- **ogni mattina alle 7** l'Azdora manda il riepilogo della giornata. Se sei lontano da casa, aggiunge il meteo di dove sei; se ci sono allerte, le mette in fondo. Poi arrivano i **promemoria delle scadenze**: 30, 7 e 1 giorno prima, il giorno stesso, e se sono scadute e non pagate. Il **1° del mese** arriva anche il **resoconto delle spese** del mese prima;
 - **ogni 15 minuti** controlla se ci sono **notizie nuove** sul comune in cui ti trovi e **allerte nuove** nella tua regione, e te le manda con il link. Non ti manda mai due volte la stessa cosa.
 
 Ecco un riepilogo vero:
@@ -81,7 +88,9 @@ flowchart LR
 5. **La memoria.** Su Vercel ogni richiesta parte da zero. Per questo la posizione e l'elenco di cosa è già stato mandato stanno su **Upstash Redis**, che si usa via HTTP senza driver ([`archivio.py`](azdora/archivio.py)). La "zona" è l'ultima posizione degli ultimi 3 giorni, altrimenti Riccione ([`posizione.py`](azdora/posizione.py)).
 6. **Notizie** ([`notizie.py`](azdora/notizie.py)): i feed RSS di Rimini Today, Altarimini, Chiamami Città e il Resto del Carlino (solo se sei in Riviera), filtrati sul nome del comune, più una ricerca su Google News che funziona ovunque. L'XML si legge con `defusedxml`; doppioni, notizie vecchie e siti di scommesse vengono scartati.
 7. **Allerte** ([`allerte.py`](azdora/allerte.py)): l'API pubblica di **Meteoalarm**, per regione, dal livello giallo in su. In Emilia-Romagna il bot aggiunge il link ad Allerta Meteo Emilia-Romagna, che pubblica le allerte ufficiali.
-8. **cron-job.org** chiama [`api/cron.py`](api/cron.py) con un secondo segreto: alle 7 con `job=mattino` (il riepilogo), ogni 15 minuti con `job=controlli` (allerte e notizie nuove).
+8. **Scadenze, spese e lista** ([`scadenze.py`](azdora/scadenze.py), [`spese.py`](azdora/spese.py), [`lista.py`](azdora/lista.py)): si scrivono come si parla. Il parser capisce date (`31/01`, `domani`), importi (`12,50€`, `1.234`) e ricorrenze in qualsiasi ordine ([`soldi.py`](azdora/soldi.py)). Gli importi sono tenuti in centesimi interi. Ogni chat ha i suoi dati, quindi il gruppo di coppia ha spese e lista di casa separate da quelle personali. I pulsanti sotto i messaggi aggiornano il messaggio stesso, senza riempire la chat.
+9. **Weekend** ([`weekend.py`](azdora/weekend.py)): un piccolo catalogo di gite a meno di un'ora da Riccione. Se il weekend è brutto propone quelle al coperto, e ogni settimana ne sceglie di diverse. Sagre ed eventi arrivano dagli articoli "Eventi" di Altarimini e da Google News, filtrati sulla Romagna.
+10. **cron-job.org** chiama [`api/cron.py`](api/cron.py) con un secondo segreto: alle 7 con `job=mattino` (il riepilogo), ogni 15 minuti con `job=controlli` (allerte e notizie nuove).
 
 ### Scelte di progetto
 
@@ -103,7 +112,8 @@ flowchart LR
 - **Nessun segreto nel codice.** Token e chiavi vivono solo nelle variabili d'ambiente di Vercel e nei GitHub Secrets. Il file `.env` è escluso da git.
 - **Webhook protetto**: le richieste senza l'header `X-Telegram-Bot-Api-Secret-Token` giusto ricevono `401`. Il confronto è a tempo costante.
 - **Cron protetto**: serve `Authorization: Bearer <CRON_SECRET>`.
-- **Il bot risponde solo a due chat**: la tua chat privata e, in futuro, il gruppo di coppia. Agli sconosciuti dice solo il loro `/id`. Se un estraneo lo aggiunge a un gruppo, il bot esce da solo.
+- **Il bot risponde solo a due chat**: la tua chat privata e il gruppo di coppia. Agli sconosciuti dice solo il loro `/id`. Se un estraneo lo aggiunge a un gruppo, il bot esce da solo.
+- **Scadenze, spese e lista** stanno solo nel tuo database Upstash, mai nel repository.
 - **Posizione**: la salva solo se gliela mandi tu, nel tuo database Upstash, e la cancella da sola dopo 30 giorni (per notizie e allerte conta solo quella degli ultimi 3). Con `/dimentica` la cancelli subito. Le coordinate vanno a Open-Meteo e Nominatim solo per chiedere meteo e nome del luogo.
 - **Nei log non finisce il token**: gli errori di rete vengono riformulati senza l'URL, che lo contiene.
 
@@ -167,7 +177,13 @@ Per provare il riepilogo senza cron-job.org c'è anche il workflow **Actions →
    - **Header**: lo stesso `Authorization` di prima.
 4. Mandagli la posizione e prova `/notizie` e `/allerte`.
 
-Senza Upstash il bot funziona lo stesso, ma non ricorda la posizione e i controlli automatici non mandano nulla, per non ripeterti ogni volta le stesse notizie.
+Senza Upstash meteo, notizie e weekend funzionano lo stesso. Scadenze, spese e lista invece hanno bisogno della memoria, e i controlli automatici non mandano nulla per non ripeterti ogni volta le stesse notizie.
+
+### 7. Il gruppo di coppia (facoltativo)
+1. Crea un gruppo Telegram con la tua ragazza e aggiungi il bot: siccome lo aggiungi tu, resta e ti scrive l'id del gruppo (un numero negativo).
+2. Metti quel numero in `TELEGRAM_CHAT_ID_COPPIA` su Vercel e fai **Redeploy**.
+3. Su @BotFather manda `/setjoingroups`, scegli il bot e poi **Disable**: nessun altro potrà più aggiungerlo a un gruppo.
+4. Nel gruppo funzionano tutti i comandi: lista condivisa, spese di casa, scadenze comuni, weekend.
 
 ## 🛠️ Sviluppo in locale
 
@@ -191,6 +207,8 @@ python -m azdora.simula /oggi "/vento rimini" "/meteo cesenatico" /mare
 python -m azdora.simula posizione:43.978,12.697   # come se mandassi la posizione
 python -m azdora.simula /notizie /allerte    # notizie e allerte della zona
 python -m azdora.simula posizione:44.49,11.34 controlli   # i controlli ogni 15 minuti
+python -m azdora.simula "/scadenza 7/11 bollo 180€ annuale" /scadenze tocca:pagato:1
+python -m azdora.simula "/spesa 45 benzina" /mese "/aggiungi latte, pane" tocca:voce:1 /weekend
 python -m azdora.simula mattino              # il messaggio delle 7
 python -m azdora.simula --offline /domani    # con i dati salvati, senza internet
 ```
@@ -215,6 +233,11 @@ azdora-bot/
 │  ├─ archivio.py          # memoria: Upstash Redis (o in memoria per i test)
 │  ├─ notizie.py           # feed RSS e Google News, filtri e doppioni
 │  ├─ allerte.py           # allerte Meteoalarm per regione
+│  ├─ scadenze.py          # scadenze, ricorrenze e promemoria
+│  ├─ spese.py             # spese, categorie, resoconto, CSV
+│  ├─ soldi.py             # importi in centesimi, date e mesi all'italiana
+│  ├─ lista.py             # lista condivisa con le spunte
+│  ├─ weekend.py           # meteo del weekend, gite e sagre
 │  ├─ app.py               # monta i pezzi reali
 │  ├─ simula.py            # simulatore da terminale
 │  ├─ configura.py         # imposta webhook e menu comandi
@@ -233,10 +256,10 @@ azdora-bot/
 - [x] **Tappa 1: meteo, vento e mare.** Comandi, riepilogo delle 7, test, CI.
 - [x] **Meteo dove sei.** Posizione condivisa, `/qui`, qualsiasi comune per nome.
 - [x] **Tappa 2: notizie e allerte intorno a me.** Posizione ricordata (anche in tempo reale), notizie nuove con link, allerte Meteoalarm, riepilogo che segue la posizione.
-- [ ] **Tappa 3: scadenze.** Bollo, assicurazione, revisione, bollette, con promemoria a 30, 7 e 1 giorno e il pulsante "✅ Pagato".
-- [ ] **Tappa 4: spese mensili.** `/spesa 45 benzina`, riepilogo per categoria e resoconto il 1° del mese.
-- [ ] **Tappa 5: chat di coppia.** Lista condivisa delle cose da fare, idee per il weekend: giri della domenica, sagre ed eventi in Romagna, con il meteo.
-- [ ] **Extra**: carburante più economico in zona (open data MIMIT), UV e pollini, treni Riccione–Bologna, raccolta differenziata.
+- [x] **Tappa 3: scadenze.** Bollo, assicurazione, revisione, bollette, con promemoria a 30, 7, 1 e 0 giorni e il pulsante "✅ Pagato".
+- [x] **Tappa 4: spese mensili.** `/spesa 45 benzina`, riepilogo per categoria, resoconto il 1° del mese, esportazione in CSV.
+- [x] **Tappa 5: chat di coppia.** Lista condivisa con le spunte, idee per il weekend: giri della domenica, sagre ed eventi in Romagna, con il meteo.
+- [ ] **Prossime idee**: carburante più economico in zona (open data MIMIT), UV e pollini, treni Riccione–Bologna, raccolta differenziata.
 
 ## 🙏 Fonti dei dati
 
@@ -258,7 +281,10 @@ azdora-bot/
   - sea state (waves on the Douglas scale, water temperature);
   - a daily 7 AM briefing with practical tips;
   - weather wherever you are: share your Telegram location (live location too), or ask for any town by name;
-  - location-aware local news with links (local RSS feeds and Google News) and Meteoalarm weather alerts, pushed every 15 minutes without repeats.
+  - location-aware local news with links (local RSS feeds and Google News) and Meteoalarm weather alerts, pushed every 15 minutes without repeats;
+  - bill and car-tax reminders with a "Paid" button (recurring deadlines roll forward and become expenses);
+  - monthly expenses with automatic categories, monthly reports and CSV export;
+  - a shared checklist for couples and weekend ideas (weather-aware day trips and local festivals).
 - **Stack:**
   - Python 3.12 and `httpx`, calling the Telegram Bot API directly (no bot framework);
   - Telegram webhook served by Vercel serverless functions;
@@ -268,12 +294,9 @@ azdora-bot/
 - **Zero cost** on free tiers. Secrets live only in environment variables, never in the code.
 - **Quality:**
   - business logic is decoupled from infrastructure through small protocols;
-  - 280+ pytest tests, using real recorded API responses and respx HTTP mocks, including an end-to-end test of the Vercel handlers;
+  - 430+ pytest tests, using real recorded API responses and respx HTTP mocks, including an end-to-end test of the Vercel handlers;
   - ruff lint and format checks;
   - GitHub Actions CI.
-- **Roadmap:**
-  - bill and car-tax reminders;
-  - monthly expenses;
-  - a shared to-do list and weekend ideas for couples.
+- **Next ideas:** cheapest fuel nearby (Italian open data), UV and pollen, train delays, waste-collection reminders.
 
 Licensed under the [MIT License](LICENSE).

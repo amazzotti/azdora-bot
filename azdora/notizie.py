@@ -60,6 +60,7 @@ class Notizia:
     fonte: str
     data: datetime | None = None
     sommario: str = ""
+    categorie: tuple[str, ...] = ()  # es. ("Riccione", "Eventi") su Altarimini
 
     @property
     def impronta(self) -> str:
@@ -110,13 +111,18 @@ def leggi_feed(xml: bytes | str, fonte: str) -> list[Notizia]:
         sommario = "" if sorgente else _testo_pulito(voce.findtext("description"))
         if len(sommario) > LUNGHEZZA_SOMMARIO:
             sommario = sommario[: LUNGHEZZA_SOMMARIO - 1].rsplit(" ", 1)[0] + "…"
-        notizie.append(Notizia(titolo, link, nome_fonte, _data(voce.findtext("pubDate")), sommario))
+        categorie = tuple(c for c in (_testo_pulito(e.text) for e in voce.findall("category")) if c)
+        notizie.append(
+            Notizia(titolo, link, nome_fonte, _data(voce.findtext("pubDate")), sommario, categorie)
+        )
     return notizie
 
 
 def parla_di(notizia: Notizia, comune: str) -> bool:
-    """La notizia cita il comune (parola intera, maiuscole indifferenti)?"""
+    """La notizia cita il comune (parola intera, maiuscole indifferenti) o è etichettata così?"""
     schema = re.compile(rf"\b{re.escape(comune)}\b", re.IGNORECASE)
+    if any(c.lower() == comune.lower() for c in notizia.categorie):
+        return True
     return bool(schema.search(notizia.titolo) or schema.search(notizia.sommario))
 
 
@@ -155,9 +161,47 @@ def formatta(notizie: Sequence[Notizia], titolo: str) -> str:
     return "\n".join(righe)
 
 
+def formatta_breve(notizie: Sequence[Notizia], titolo: str) -> str:
+    """Elenco compatto: un link per riga, con il giornale tra parentesi."""
+    righe = [titolo]
+    righe += [
+        f'• <a href="{escape(n.link, quote=True)}">{escape(n.titolo)}</a> '
+        f"<i>({escape(n.fonte)})</i>"
+        for n in notizie
+    ]
+    return "\n".join(righe)
+
+
+# --- Eventi e sagre ------------------------------------------------------------------------
+
+URL_EVENTI_GOOGLE = (
+    "https://news.google.com/rss/search?q=(sagra+OR+festa+OR+eventi)+"
+    "(Rimini+OR+Riccione+OR+Romagna)+weekend+when:7d&hl=it&gl=IT&ceid=IT:it"
+)
+URL_ALTARIMINI = "https://www.altarimini.it/feed/"
+_RIVIERA = re.compile(
+    r"rimini|riccione|romagn|cattolica|misano|bellaria|santarcangelo|verucchio|san leo|"
+    r"gradara|san marino|cesena|forl[iì]|ravenna|cervia|valmarecchia|valconca|pesaro",
+    re.IGNORECASE,
+)
+
+
+def e_in_riviera(notizia: Notizia) -> bool:
+    testo = " ".join((notizia.titolo, notizia.fonte, notizia.sommario, *notizia.categorie))
+    return bool(_RIVIERA.search(testo))
+
+
+def e_un_evento(notizia: Notizia) -> bool:
+    return any(c.lower() in {"eventi", "cultura", "spettacoli"} for c in notizia.categorie)
+
+
 class FonteNotizie(Protocol):
     def notizie_per(self, comune: str, lat: float, lon: float, adesso: datetime) -> list[Notizia]:
         """Notizie recenti che parlano del comune, dalla più recente."""
+        ...
+
+    def eventi(self, adesso: datetime) -> list[Notizia]:
+        """Sagre, feste ed eventi in Riviera della settimana."""
         ...
 
 
@@ -186,3 +230,15 @@ class LettoreNotizie:
         trovate += self._scarica(Fonte("Google News", url_google_news(comune)))
         pulite = [n for n in recenti(trovate, adesso) if not e_spazzatura(n)]
         return ordina(senza_doppioni(pulite))
+
+    def eventi(self, adesso: datetime) -> list[Notizia]:
+        locali = [n for n in self._scarica(Fonte("Altarimini", URL_ALTARIMINI)) if e_un_evento(n)]
+        google = [
+            n
+            for n in self._scarica(Fonte("Google News", URL_EVENTI_GOOGLE))
+            if e_in_riviera(n) and not e_spazzatura(n)
+        ]
+        settimana = [
+            n for n in [*locali, *google] if n.data is None or adesso - n.data <= timedelta(days=7)
+        ]
+        return ordina(senza_doppioni(settimana))
