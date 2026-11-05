@@ -283,6 +283,10 @@ def titolo_notizie(etichetta: str, nuove: bool) -> str:
     return f"🗞️ <b>Ultime notizie da {escape(etichetta)}</b>"
 
 
+def titolo_notizie_riviera(comune: str) -> str:
+    return f"🗞️ <b>Le notizie di oggi in Riviera</b>\n<i>📍 = parla di {escape(comune)}</i>"
+
+
 def nessuna_notizia(etichetta: str) -> str:
     return f"🗞️ Nessuna notizia nelle ultime ore su {escape(etichetta)}."
 

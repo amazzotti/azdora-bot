@@ -192,3 +192,69 @@ def test_categorie_lette_dal_feed():
     assert parla_di(
         Notizia("Titolo", "https://a", "x", categorie=("Misano Adriatico",)), "misano adriatico"
     )
+
+
+def test_del_giorno_alternate_e_prima_quelle_del_comune():
+    from datetime import timedelta as td
+
+    from azdora.notizie import alternate, del_giorno, prima_quelle_di
+
+    ieri = ADESSO - td(days=1, hours=2)
+    carlino = [
+        Notizia(f"Carlino {i}", f"https://c/{i}", "Carlino", ADESSO - td(minutes=i))
+        for i in range(8)
+    ]
+    alta = [
+        Notizia(f"Alta {i}", f"https://a/{i}", "Altarimini", ADESSO - td(minutes=30 + i))
+        for i in range(3)
+    ]
+    vecchia = Notizia("Vecchia", "https://v", "Carlino", ieri)
+    oggi = del_giorno([*carlino, *alta, vecchia], ADESSO)
+    assert vecchia not in oggi and len(oggi) == 11
+    scelte = alternate(oggi, 6)
+    assert {n.fonte for n in scelte} == {"Carlino", "Altarimini"}
+    assert sum(n.fonte == "Altarimini" for n in scelte) == 3
+    riccione = Notizia("Festa a Riccione", "https://r", "Carlino", ADESSO - td(hours=3))
+    ordinate = prima_quelle_di([*scelte, riccione], "Riccione")
+    assert ordinate[0] == riccione
+
+
+def test_del_giorno_con_poche_notizie_usa_le_ultime_24_ore():
+    from datetime import timedelta as td
+
+    from azdora.notizie import del_giorno
+
+    mezzanotte = ADESSO.replace(hour=0, minute=30)  # 01:30 a Roma: oggi c'è poco
+    ieri_sera = [
+        Notizia(f"Sera {i}", f"https://s/{i}", "x", mezzanotte - td(hours=i + 1)) for i in range(6)
+    ]
+    assert len(del_giorno(ieri_sera, mezzanotte)) == 6
+
+
+@respx.mock
+def test_rimini_today_bloccato_passa_da_google_news():
+    from azdora.notizie import FONTI_RIVIERA
+
+    rimini_today = FONTI_RIVIERA[0]
+    respx.get(rimini_today.url).mock(return_value=httpx.Response(403))
+    respx.get(rimini_today.riserva).mock(
+        return_value=httpx.Response(200, content=_feed("rss_googlenews.xml"))
+    )
+    with httpx.Client() as http:
+        notizie = LettoreNotizie(http, [rimini_today])._scarica(rimini_today)
+    assert notizie and all(n.fonte == "Rimini Today" for n in notizie)
+
+
+@respx.mock
+def test_del_giorno_in_riviera_mescola_i_giornali():
+    for fonte, file in zip(
+        FONTI_RIVIERA,
+        ["rss_riminitoday.xml", "rss_altarimini.xml", "rss_chiamamicitta.xml", "rss_carlino.xml"],
+        strict=True,
+    ):
+        respx.get(fonte.url).mock(return_value=httpx.Response(200, content=_feed(file)))
+    with httpx.Client() as http:
+        notizie = LettoreNotizie(http).del_giorno_in_riviera("Riccione", ADESSO)
+    assert 5 <= len(notizie) <= 10
+    assert len({n.fonte for n in notizie}) >= 3
+    assert parla_di(notizie[0], "Riccione")

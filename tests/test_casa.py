@@ -24,6 +24,9 @@ class EventiFinti:
     def notizie_per(self, comune, lat, lon, adesso):
         return []
 
+    def del_giorno_in_riviera(self, comune, adesso):
+        return []
+
     def eventi(self, adesso):
         return list(self.eventi_settimana)
 

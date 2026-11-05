@@ -42,12 +42,16 @@ from azdora.meteo.openmeteo import (
     leggi_previsioni,
 )
 from azdora.notizie import (
+    NOTIZIE_DEL_GIORNO,
     LettoreNotizie,
     Notizia,
+    alternate,
+    del_giorno,
     e_un_evento,
     leggi_feed,
     ordina,
     parla_di,
+    prima_quelle_di,
 )
 
 CHAT_SIMULATA = 1
@@ -153,6 +157,10 @@ class NotizieDaFile:
 
     def notizie_per(self, comune: str, lat: float, lon: float, adesso: datetime) -> list[Notizia]:
         return ordina(n for n in self._notizie if parla_di(n, comune))
+
+    def del_giorno_in_riviera(self, comune: str, adesso: datetime) -> list[Notizia]:
+        oggi = del_giorno(self._notizie, adesso)
+        return prima_quelle_di(alternate(oggi, NOTIZIE_DEL_GIORNO), comune)
 
     def eventi(self, adesso: datetime) -> list[Notizia]:
         return ordina(n for n in self._notizie if e_un_evento(n))

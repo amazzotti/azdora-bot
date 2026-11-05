@@ -92,6 +92,8 @@ DISTANZA_DA_CASA_KM = 15
 # Notizie: quante al massimo per messaggio e per quanto ricordarle come già mandate.
 MASSIMO_NOTIZIE = 5
 MASSIMO_NOTIZIE_ZONA_NUOVA = 3
+NOTIZIE_A_RICHIESTA = 10  # con /notizie se ne vedono di più che negli avvisi automatici
+RAGGIO_RIVIERA_KM = modulo_notizie.RAGGIO_RIVIERA_KM
 RICORDO_NOTIZIE_S = 3 * 24 * 3600
 RICORDO_ZONA_S = 30 * 24 * 3600
 
@@ -483,12 +485,23 @@ class Azdora:
         if zona is None:
             return
         comune, lat, lon = zona
-        trovate = self.notizie.notizie_per(comune, lat, lon, self.orologio())
+        adesso = self.orologio()
+        in_riviera = distanza_km(lat, lon, *modulo_notizie.RIMINI) <= RAGGIO_RIVIERA_KM
+        if not comando.argomenti and in_riviera:
+            # In Riviera: le notizie del giorno da tutti i giornali, il tuo comune in cima.
+            del_giorno = self.notizie.del_giorno_in_riviera(comune, adesso)
+            if del_giorno:
+                testo = modulo_notizie.formatta(
+                    del_giorno, messaggi.titolo_notizie_riviera(comune), evidenzia=comune
+                )
+                self.messaggero.invia_messaggio(chat.id, testo)
+                return
+        trovate = self.notizie.notizie_per(comune, lat, lon, adesso)
         if not trovate:
             self.messaggero.invia_messaggio(chat.id, messaggi.nessuna_notizia(comune))
             return
         testo = modulo_notizie.formatta(
-            trovate[:MASSIMO_NOTIZIE], messaggi.titolo_notizie(comune, nuove=False)
+            trovate[:NOTIZIE_A_RICHIESTA], messaggi.titolo_notizie(comune, nuove=False)
         )
         self.messaggero.invia_messaggio(chat.id, testo)
 

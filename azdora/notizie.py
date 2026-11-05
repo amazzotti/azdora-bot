@@ -13,7 +13,7 @@ import hashlib
 import logging
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from html import escape, unescape
@@ -33,10 +33,22 @@ log = logging.getLogger(__name__)
 class Fonte:
     nome: str
     url: str
+    # Se il feed del giornale rifiuta i programmi automatici, i suoi articoli si prendono
+    # da Google News, che li pubblica con i link al sito originale.
+    riserva: str | None = None
+
+
+def url_google_news_sito(dominio: str) -> str:
+    domanda = quote_plus(f"site:{dominio} when:1d")
+    return f"https://news.google.com/rss/search?q={domanda}&hl=it&gl=IT&ceid=IT:it"
 
 
 FONTI_RIVIERA: tuple[Fonte, ...] = (
-    Fonte("Rimini Today", "https://www.riminitoday.it/rss"),
+    Fonte(
+        "Rimini Today",
+        "https://www.riminitoday.it/rss",
+        riserva=url_google_news_sito("riminitoday.it"),
+    ),
     Fonte("Altarimini", "https://www.altarimini.it/feed/"),
     Fonte("Chiamami Città", "https://www.chiamamicitta.it/feed/"),
     Fonte("il Resto del Carlino", "https://www.ilrestodelcarlino.it/rimini/rss"),
@@ -46,6 +58,9 @@ RIMINI = (44.0594, 12.5683)
 RAGGIO_RIVIERA_KM = 40
 
 MASSIMO_ETA = timedelta(hours=36)
+NOTIZIE_DEL_GIORNO = 10
+MASSIMO_SUL_COMUNE = 6
+MINIMO_NOTIZIE_GIORNO = 5
 # Google News a volte pesca siti di scommesse e simili: non sono notizie.
 _SPAZZATURA = re.compile(r"scommess|pronostic|betting|casin[oò]", re.IGNORECASE)
 LUNGHEZZA_SOMMARIO = 220
@@ -150,15 +165,47 @@ def ordina(notizie: Iterable[Notizia]) -> list[Notizia]:
     return sorted(notizie, key=lambda n: (n.data is not None, n.data), reverse=True)
 
 
-def formatta(notizie: Sequence[Notizia], titolo: str) -> str:
+def formatta(notizie: Sequence[Notizia], titolo: str, evidenzia: str | None = None) -> str:
+    """Elenco di notizie con link; quelle che parlano di ``evidenzia`` hanno 📍."""
     righe = [titolo]
     for n in notizie:
         quando = f" · {n.data.astimezone(FUSO_ORARIO).strftime('%H:%M')}" if n.data else ""
+        icona = "📍" if evidenzia and parla_di(n, evidenzia) else "📰"
         righe.append(
-            f'\n📰 <a href="{escape(n.link, quote=True)}">{escape(n.titolo)}</a>\n'
+            f'\n{icona} <a href="{escape(n.link, quote=True)}">{escape(n.titolo)}</a>\n'
             f"<i>{escape(n.fonte)}{quando}</i>"
         )
     return "\n".join(righe)
+
+
+def del_giorno(notizie: Iterable[Notizia], adesso: datetime) -> list[Notizia]:
+    """Le notizie di oggi (ora di Roma); se sono poche, quelle delle ultime 24 ore."""
+    tutte = [n for n in notizie if n.data is not None]
+    oggi = adesso.astimezone(FUSO_ORARIO).date()
+    di_oggi = [n for n in tutte if n.data.astimezone(FUSO_ORARIO).date() == oggi]
+    if len(di_oggi) >= MINIMO_NOTIZIE_GIORNO:
+        return di_oggi
+    return [n for n in tutte if adesso - n.data <= timedelta(hours=24)]
+
+
+def alternate(notizie: Sequence[Notizia], quante: int) -> list[Notizia]:
+    """Sceglie le più recenti alternando i giornali, così compaiono tutti; poi le ordina."""
+    per_fonte: dict[str, list[Notizia]] = {}
+    for n in ordina(notizie):
+        per_fonte.setdefault(n.fonte, []).append(n)
+    scelte: list[Notizia] = []
+    while len(scelte) < quante and any(per_fonte.values()):
+        for code in per_fonte.values():
+            if code and len(scelte) < quante:
+                scelte.append(code.pop(0))
+    return ordina(scelte)
+
+
+def prima_quelle_di(notizie: Sequence[Notizia], comune: str) -> list[Notizia]:
+    """Le notizie sul comune in cima, poi le altre, ognuna dalla più recente."""
+    vicine = [n for n in notizie if parla_di(n, comune)]
+    altre = [n for n in notizie if not parla_di(n, comune)]
+    return [*ordina(vicine), *ordina(altre)]
 
 
 def formatta_breve(notizie: Sequence[Notizia], titolo: str) -> str:
@@ -204,6 +251,10 @@ class FonteNotizie(Protocol):
         """Sagre, feste ed eventi in Riviera della settimana."""
         ...
 
+    def del_giorno_in_riviera(self, comune: str, adesso: datetime) -> list[Notizia]:
+        """Le ultime notizie di oggi da tutti i giornali della Riviera, il comune in cima."""
+        ...
+
 
 class LettoreNotizie:
     """Scarica i feed veri."""
@@ -220,14 +271,34 @@ class LettoreNotizie:
         return self._gia_scaricati[fonte.url]
 
     def _scarica_davvero(self, fonte: Fonte) -> list[Notizia]:
+        notizie = self._leggi(fonte.url, fonte.nome)
+        if notizie is None and fonte.riserva:
+            log.info("Feed %s non disponibile: uso Google News", fonte.nome)
+            notizie = self._leggi(fonte.riserva, fonte.nome)
+            # Da Google arrivano con il nome scritto dal giornale ("RiminiToday"): uniformiamo.
+            notizie = [replace(n, fonte=fonte.nome) for n in notizie or []]
+        return notizie or []
+
+    def _leggi(self, url: str, nome: str) -> list[Notizia] | None:
+        """Scarica e legge un feed; ``None`` se il sito non risponde o rifiuta la richiesta."""
         try:
-            risposta = self._http.get(fonte.url, follow_redirects=True)
+            risposta = self._http.get(url, follow_redirects=True)
             risposta.raise_for_status()
         except httpx.HTTPError as errore:
             # Un giornale giù non deve fermare gli altri.
-            log.warning("Feed %s non disponibile: %s", fonte.nome, errore)
-            return []
-        return leggi_feed(risposta.content, fonte.nome)
+            log.warning("Feed %s non disponibile: %s", nome, errore)
+            return None
+        return leggi_feed(risposta.content, nome)
+
+    def del_giorno_in_riviera(self, comune: str, adesso: datetime) -> list[Notizia]:
+        tutte = [n for fonte in self._fonti_riviera for n in self._scarica(fonte)]
+        pulite = senza_doppioni(n for n in del_giorno(tutte, adesso) if not e_spazzatura(n))
+        # Al massimo 6 sul tuo comune: le altre 4 raccontano il resto della Riviera.
+        vicine = ordina(n for n in pulite if parla_di(n, comune))[:MASSIMO_SUL_COMUNE]
+        altre = alternate(
+            [n for n in pulite if not parla_di(n, comune)], NOTIZIE_DEL_GIORNO - len(vicine)
+        )
+        return prima_quelle_di([*vicine, *altre], comune)
 
     def notizie_per(self, comune: str, lat: float, lon: float, adesso: datetime) -> list[Notizia]:
         trovate: list[Notizia] = []

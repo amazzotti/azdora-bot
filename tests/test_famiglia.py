@@ -31,6 +31,9 @@ class NotizieFinte:
         self.richieste.append(comune)
         return [Notizia(f"Novità da {comune}", f"https://esempio.it/{comune}", "x", adesso)]
 
+    def del_giorno_in_riviera(self, comune, adesso):
+        return []
+
     def eventi(self, adesso):
         return []
 

@@ -28,11 +28,20 @@ BOLOGNA_XY = (44.494, 11.343)
 @dataclass
 class FinteNotizie:
     notizie: list[Notizia] = field(default_factory=list)
+    del_giorno: list[Notizia] = field(default_factory=list)
     richieste: list[str] = field(default_factory=list)
+    richieste_giorno: list[str] = field(default_factory=list)
 
     def notizie_per(self, comune, lat, lon, adesso):
         self.richieste.append(comune)
         return list(self.notizie)
+
+    def del_giorno_in_riviera(self, comune, adesso):
+        self.richieste_giorno.append(comune)
+        return list(self.del_giorno)
+
+    def eventi(self, adesso):
+        return []
 
 
 @dataclass
@@ -217,11 +226,12 @@ def test_riepilogo_mattutino_anche_con_archivio_giu(impostazioni, messaggero, me
 
 
 def test_notizie_della_zona_di_casa(bot, messaggero, notizie):
-    notizie.notizie = [notizia(i) for i in range(8)]
+    notizie.notizie = [notizia(i) for i in range(12)]
     bot.gestisci_update(messaggio("/notizie"))
-    assert notizie.richieste == ["Riccione"]
+    assert notizie.richieste_giorno == ["Riccione"]  # prima le notizie del giorno…
+    assert notizie.richieste == ["Riccione"]  # …che qui mancano: allora quelle del comune
     assert "Ultime notizie da Riccione" in messaggero.ultimo
-    assert messaggero.ultimo.count("📰") == 5
+    assert messaggero.ultimo.count("📰") == 10
 
 
 def test_notizie_seguono_la_posizione(bot, messaggero, notizie):
@@ -422,3 +432,32 @@ def test_comandi_con_archivio_giu_usano_casa(impostazioni, messaggero, meteo):
     )
     bot.gestisci_update(messaggio("/meteo"))
     assert "Meteo a Riccione" in messaggero.ultimo
+
+
+def test_notizie_del_giorno_in_riviera(bot, messaggero, notizie):
+    notizie.del_giorno = [
+        Notizia("A Riccione nuova piazza", "https://a.it/1", "Altarimini", ADESSO),
+        Notizia("Rimini, lavori sul lungomare", "https://a.it/2", "il Resto del Carlino", ADESSO),
+    ]
+    bot.gestisci_update(messaggio("/notizie"))
+    testo = messaggero.ultimo
+    assert "Le notizie di oggi in Riviera" in testo
+    assert '📍 <a href="https://a.it/1">' in testo
+    assert '📰 <a href="https://a.it/2">' in testo
+    assert notizie.richieste == []  # non serve la ricerca per comune
+
+
+def test_notizie_con_localita_scritta_restano_filtrate(bot, notizie):
+    notizie.del_giorno = [notizia(1)]
+    bot.gestisci_update(messaggio("/notizie rimini"))
+    assert notizie.richieste_giorno == []
+    assert notizie.richieste == ["Rimini"]
+
+
+def test_fuori_riviera_niente_giornali_locali(bot, notizie, luoghi):
+    notizie.del_giorno = [notizia(1)]
+    luoghi.luogo = BOLOGNA
+    bot.gestisci_update(posizione(*BOLOGNA_XY))
+    bot.gestisci_update(messaggio("/notizie"))
+    assert notizie.richieste_giorno == []
+    assert notizie.richieste == ["Bologna"]
