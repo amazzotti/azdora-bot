@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from html import escape
 
+from azdora.feste import Festa, riga_festa
 from azdora.meteo.codici_wmo import CODICI_NEVE, CODICI_PIOGGIA, CODICI_TEMPORALE, condizione
 from azdora.meteo.openmeteo import MeteoGiorno
 from azdora.notizie import Notizia, formatta_breve
@@ -97,6 +98,7 @@ def messaggio_weekend(
     domenica: MeteoGiorno | None,
     giorno_sabato: date,
     eventi: Sequence[Notizia],
+    feste: Sequence[Festa] = (),
 ) -> str:
     al_coperto = brutto_tempo(sabato) and brutto_tempo(domenica)
     settimana = giorno_sabato.isocalendar().week
@@ -111,6 +113,9 @@ def messaggio_weekend(
     ]
     for idea in idee:
         righe.append(f"• <b>{escape(idea.nome)}</b> ({idea.km} km): {escape(idea.descrizione)}")
+    if feste:
+        righe += ["", "📅 <b>Feste di questo weekend</b> <i>(date indicative)</i>"]
+        righe += [riga_festa(f) for f in feste]
     if eventi:
         righe += ["", formatta_breve(eventi[:5], "🎪 <b>Sagre ed eventi in zona</b>")]
     return "\n".join(righe)

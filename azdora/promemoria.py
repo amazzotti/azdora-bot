@@ -1,11 +1,15 @@
 """Promemoria scritti come si parla: "ricordami domani alle 18 di chiamare il meccanico".
 
+Anche ricorrenti: "ricordami ogni lunedì alle 8 di portare fuori la plastica",
+"ricordami ogni mese il 5 di pagare l'affitto", "ricordami ogni sera di prendere la pastiglia".
+
 Il bot li consegna durante il giro di controlli (ogni 15 minuti), quindi l'orario è
 preciso al quarto d'ora.
 """
 
 from __future__ import annotations
 
+import calendar
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -15,6 +19,7 @@ from typing import Any
 
 from azdora.archivio import Archivio
 from azdora.config import FUSO_ORARIO
+from azdora.soldi import aggiungi_mesi
 
 GIORNI_SETTIMANA = ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
 _GIORNI_SENZA_ACCENTO = {g.replace("ì", "i"): i for i, g in enumerate(GIORNI_SETTIMANA)}
@@ -49,6 +54,19 @@ _GIORNO_PAROLA = re.compile(
 )
 _INIZIO = re.compile(r"^\s*(?:/ricordami|ricordami|ricordamelo|ricorda(?:mi)?)\b[\s,:]*", re.I)
 _RIEMPITIVI = re.compile(r"^(?:di|che|a|ad|per|:|,)\s+", re.IGNORECASE)
+_OGNI = re.compile(
+    r"\b(?:ogni|tutti\s+i|tutte\s+le)\s+(?P<cosa>giorn[oi]|mattin[ae]|ser[ae]|settiman[ae]|"
+    r"mes[ei]|ann[oi]|luned[iì]|marted[iì]|mercoled[iì]|gioved[iì]|venerd[iì]|sabat[oi]|"
+    r"domeniche|domenica)\b",
+    re.IGNORECASE,
+)
+_GIORNO_DEL_MESE = re.compile(r"\bil\s+(?P<g>\d{1,2})\b(?![/.-]\d)", re.IGNORECASE)
+NOMI_RIPETIZIONI = {
+    "giorno": "ogni giorno",
+    "settimana": "ogni settimana",
+    "mese": "ogni mese",
+    "anno": "ogni anno",
+}
 
 
 @dataclass(frozen=True)
@@ -56,13 +74,32 @@ class Promemoria:
     id: int
     quando: datetime
     testo: str
+    ripeti: str | None = None  # giorno, settimana, mese, anno
 
     def in_dizionario(self) -> dict[str, Any]:
-        return {"id": self.id, "quando": self.quando.isoformat(), "testo": self.testo}
+        return {
+            "id": self.id,
+            "quando": self.quando.isoformat(),
+            "testo": self.testo,
+            "ripeti": self.ripeti,
+        }
 
     @classmethod
     def da_dizionario(cls, dati: dict[str, Any]) -> Promemoria:
-        return cls(dati["id"], datetime.fromisoformat(dati["quando"]), dati["testo"])
+        return cls(
+            dati["id"], datetime.fromisoformat(dati["quando"]), dati["testo"], dati.get("ripeti")
+        )
+
+
+def prossima_volta(quando: datetime, ripeti: str) -> datetime:
+    """La volta successiva di un promemoria che si ripete."""
+    if ripeti == "giorno":
+        return quando + timedelta(days=1)
+    if ripeti == "settimana":
+        return quando + timedelta(weeks=1)
+    mesi = 12 if ripeti == "anno" else 1
+    giorno = aggiungi_mesi(quando.date(), mesi)
+    return datetime.combine(giorno, quando.timetz())
 
 
 class ErrorePromemoria(ValueError):
@@ -169,11 +206,13 @@ class RegistroPromemoria:
     def _salva(self, voci: Sequence[Promemoria]) -> None:
         self._archivio.scrivi(self._chiave, [p.in_dizionario() for p in voci])
 
-    def aggiungi(self, quando: datetime, testo: str) -> Promemoria:
+    def aggiungi(self, quando: datetime, testo: str, ripeti: str | None = None) -> Promemoria:
         voci = self.tutti()
         if len(voci) >= MASSIMO_PROMEMORIA:
             raise ErrorePromemoria(f"Hai già {MASSIMO_PROMEMORIA} promemoria: cancellane qualcuno")
-        nuovo = Promemoria(max((p.id for p in voci), default=0) + 1, quando, testo)
+        prossimo_id = max([p.id for p in voci] + [self._ultimo_id()], default=0) + 1
+        nuovo = Promemoria(prossimo_id, quando, testo, ripeti)
+        self._archivio.scrivi(f"{self._chiave}:ultimo-id", prossimo_id)
         self._salva([*voci, nuovo])
         return nuovo
 
@@ -184,13 +223,36 @@ class RegistroPromemoria:
             self._salva([p for p in voci if p.id != id_promemoria])
         return trovato
 
+    def _ultimo_id(self) -> int:
+        """Gli id non si riusano mai: i pulsanti "rimanda" di un vecchio avviso restano giusti."""
+        return int(self._archivio.leggi(f"{self._chiave}:ultimo-id") or 0)
+
     def scaduti(self, adesso: datetime) -> list[Promemoria]:
-        """Toglie e restituisce i promemoria arrivati all'ora giusta."""
+        """Restituisce i promemoria arrivati all'ora giusta.
+
+        Quelli singoli vengono tolti; quelli ricorrenti si spostano alla volta successiva.
+        """
         voci = self.tutti()
         da_dire = [p for p in voci if p.quando <= adesso]
-        if da_dire:
-            self._salva([p for p in voci if p.quando > adesso])
+        if not da_dire:
+            return []
+        rimasti = [p for p in voci if p.quando > adesso]
+        for p in da_dire:
+            if p.ripeti:
+                prossima = p.quando
+                while prossima <= adesso:
+                    prossima = prossima_volta(prossima, p.ripeti)
+                rimasti.append(Promemoria(p.id, prossima, p.testo, p.ripeti))
+        self._salva(rimasti)
+        consegnati = self._archivio.leggi(f"{self._chiave}:consegnati") or {}
+        consegnati.update({str(p.id): p.testo for p in da_dire})
+        self._archivio.scrivi(f"{self._chiave}:consegnati", consegnati, 7 * 24 * 3600)
         return da_dire
+
+    def testo_consegnato(self, id_promemoria: int) -> str | None:
+        """Il testo di un promemoria già arrivato (per i pulsanti "rimanda")."""
+        consegnati = self._archivio.leggi(f"{self._chiave}:consegnati") or {}
+        return consegnati.get(str(id_promemoria))
 
     def del_giorno(self, giorno: date) -> list[Promemoria]:
         return [p for p in self.tutti() if p.quando.astimezone(FUSO_ORARIO).date() == giorno]
@@ -210,9 +272,10 @@ def quando_leggibile(quando: datetime, adesso: datetime) -> str:
 
 
 def conferma(promemoria: Promemoria, adesso: datetime) -> str:
+    ripeti = f", e poi 🔁 {NOMI_RIPETIZIONI[promemoria.ripeti]}" if promemoria.ripeti else ""
     return (
         f"⏰ Ok! Ti ricordo <b>{escape(promemoria.testo)}</b> "
-        f"{quando_leggibile(promemoria.quando, adesso)}.\n/promemoria per vederli tutti."
+        f"{quando_leggibile(promemoria.quando, adesso)}{ripeti}.\n/promemoria per vederli tutti."
     )
 
 
@@ -227,7 +290,11 @@ def elenco(voci: Sequence[Promemoria], adesso: datetime) -> str:
             "Scrivimi ad esempio: <i>ricordami domani alle 18 di chiamare il meccanico</i>"
         )
     righe = ["⏰ <b>I tuoi promemoria</b>", ""]
-    righe += [f"• {quando_leggibile(p.quando, adesso)}: {escape(p.testo)}" for p in voci]
+    righe += [
+        f"• {quando_leggibile(p.quando, adesso)}: {escape(p.testo)}"
+        + (f" 🔁 {NOMI_RIPETIZIONI[p.ripeti]}" if p.ripeti else "")
+        for p in voci
+    ]
     righe += ["", "Tocca 🗑 per cancellarne uno."]
     return "\n".join(righe)
 
@@ -248,5 +315,71 @@ USO = (
     "• <i>ricordami tra 2 ore di togliere la torta dal forno</i>\n"
     "• <i>ricordami venerdì di prenotare il ristorante</i>\n"
     "• <i>ricordami il 12/11 alle 9 il dentista</i>\n"
+    "• <i>ricordami ogni lunedì alle 20 di portare fuori la plastica</i>\n"
+    "• <i>ricordami ogni mese il 5 di pagare l'affitto</i>\n"
     "Arrivano con una precisione di un quarto d'ora."
 )
+
+
+def leggi_ricorrente(frase: str, adesso: datetime) -> tuple[datetime, str, str | None]:
+    """Come ``leggi_promemoria``, ma capisce anche "ogni giorno/lunedì/mese/anno".
+
+    Restituisce (prima volta, cosa ricordare, ripetizione oppure ``None``).
+    """
+    ogni = _OGNI.search(frase)
+    if ogni is None:
+        return (*leggi_promemoria(frase, adesso), None)
+    parola = ogni["cosa"].lower().replace("ì", "i")
+    resto = frase.replace(ogni.group(0), " ")
+    if parola.startswith("giorn"):
+        ripeti, aggiunta = "giorno", ""
+    elif parola.startswith("mattin"):
+        ripeti, aggiunta = "giorno", " alle 8"
+    elif parola.startswith("ser"):
+        ripeti, aggiunta = "giorno", " alle 20"
+    elif parola.startswith("settiman"):
+        ripeti, aggiunta = "settimana", ""
+    elif parola.startswith("mes"):
+        ripeti, aggiunta = "mese", ""
+        if (giorno := _GIORNO_DEL_MESE.search(resto)) is not None:
+            numero = int(giorno["g"])
+            if not 1 <= numero <= 31:
+                raise ErrorePromemoria("Questo giorno del mese non esiste")
+            mese = adesso.date().replace(day=1)
+            primo = aggiungi_mesi(mese, 0 if numero >= adesso.day else 1)
+            ultimo = calendar.monthrange(primo.year, primo.month)[1]
+            primo = primo.replace(day=min(numero, ultimo))  # il 31 a novembre è il 30
+            resto = resto.replace(giorno.group(0), f" il {primo.day}/{primo.month}/{primo.year}")
+    elif parola.startswith("ann"):
+        ripeti, aggiunta = "anno", ""
+    else:
+        # "ogni lunedì" (o "tutti i lunedì"): la prima volta è il prossimo lunedì.
+        ripeti = "settimana"
+        nome = next(g for g in _GIORNI_SENZA_ACCENTO if g.startswith(parola[:5]))
+        aggiunta = f" {nome}"
+    if not _ALLE.search(resto) and not _ALLE.search(aggiunta):
+        aggiunta += f" alle {ORA_PREDEFINITA:%H:%M}"
+    try:
+        quando, cosa = leggi_promemoria(f"{resto}{aggiunta}", adesso)
+    except ErrorePromemoria as errore:
+        # "ogni mese il 5" detto il 5 pomeriggio: si parte dal mese prossimo.
+        if "passato" not in str(errore) or (data := _DATA.search(resto)) is None:
+            raise
+        prima = date(int(data["a"]), int(data["mese"]), int(data["g"]))
+        dopo = aggiungi_mesi(prima, 12 if ripeti == "anno" else 1)
+        resto = resto.replace(data.group(0), f"{dopo.day}/{dopo.month}/{dopo.year}")
+        quando, cosa = leggi_promemoria(f"{resto}{aggiunta}", adesso)
+    return quando, cosa, ripeti
+
+
+def pulsanti_avviso(promemoria: Promemoria) -> dict[str, Any]:
+    """Sotto il promemoria arrivato: rimanda di un'ora, a domani, oppure fatto."""
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "⏰ +1 ora", "callback_data": f"prpost:{promemoria.id}:60"},
+                {"text": "📅 Domani", "callback_data": f"prpost:{promemoria.id}:d"},
+            ],
+            [{"text": "✅ Fatto", "callback_data": f"prok:{promemoria.id}"}],
+        ]
+    }

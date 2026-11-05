@@ -183,11 +183,13 @@ def mare_del_giorno(giorno: MareGiorno | None) -> str:
 AIUTO = """👋 <b>Ciao, sono l'Azdora!</b> Mando avanti la casa. Scrivimi come parli:
 • <i>45 benzina</i> o <i>ho speso 12,50 per la pizza</i> → segno la spesa
 • <i>ricordami domani alle 18 di chiamare il meccanico</i> → te lo ricordo
+• <i>ricordami ogni lunedì alle 20 di portare fuori la plastica</i> → ogni settimana
 • 📍 mandami la posizione → meteo, notizie e allerte di dove sei
 
 🌤️ <b>Meteo</b>
 /oggi · /domani – riepilogo con consigli
 /meteo · /vento · /mare – dove sei o dove vuoi: <code>/vento cesenatico</code>
+/costa – tempo, vento e mare da Cervia a Pesaro (anche <code>/costa domani</code>)
 /aria – UV, qualità dell'aria e pollini · /qui – manda la posizione
 
 🗞️ <b>Intorno a te</b>
@@ -205,7 +207,7 @@ AIUTO = """👋 <b>Ciao, sono l'Azdora!</b> Mando avanti la casa. Scrivimi come 
 /conti · /pareggio – nel gruppo: chi deve quanto a chi
 /rifiuti – raccolta differenziata, avviso la sera prima
 /promemoria – i tuoi promemoria · /sera – riepilogo delle 20
-/weekend – meteo, gite e sagre
+/weekend – meteo, gite e sagre · /sagre – feste da Cervia a Pesaro
 
 Ogni mattina alle 7 ti mando il riepilogo ☕. /id – l'id di questa chat"""
 

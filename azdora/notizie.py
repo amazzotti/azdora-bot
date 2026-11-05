@@ -319,11 +319,34 @@ def formatta_breve(notizie: Sequence[Notizia], titolo: str) -> str:
 
 # --- Eventi e sagre ------------------------------------------------------------------------
 
-URL_EVENTI_GOOGLE = (
-    "https://news.google.com/rss/search?q=(sagra+OR+festa+OR+eventi)+"
-    "(Rimini+OR+Riccione+OR+Cesena+OR+Cesenatico+OR+Cervia+OR+%22Milano+Marittima%22+OR+"
-    "Pesaro+OR+Romagna)+weekend+when:7d&hl=it&gl=IT&ceid=IT:it"
+PAESI_EVENTI = (
+    "Cervia",
+    "Milano Marittima",
+    "Cesenatico",
+    "Cesena",
+    "Bellaria",
+    "Rimini",
+    "Riccione",
+    "Santarcangelo",
+    "Misano",
+    "Cattolica",
+    "Gabicce",
+    "Gradara",
+    "Pesaro",
+    "San Marino",
+    "Verucchio",
+    "San Leo",
 )
+URL_EVENTI_GOOGLE = (
+    "https://news.google.com/rss/search?q="
+    + quote_plus(
+        '(sagra OR fiera OR festa OR mercatino OR "fine settimana") ('
+        + " OR ".join(f'"{p}"' for p in PAESI_EVENTI)
+        + ") when:14d"
+    )
+    + "&hl=it&gl=IT&ceid=IT:it"
+)
+GIORNI_EVENTI = 14
 URL_ALTARIMINI = "https://www.altarimini.it/feed/"
 _RIVIERA = re.compile(
     r"rimini|riccione|romagn|cattolica|misano|bellaria|santarcangelo|verucchio|san leo|"
@@ -424,6 +447,8 @@ class LettoreNotizie:
             if e_in_riviera(n) and not e_spazzatura(n)
         ]
         settimana = [
-            n for n in [*locali, *google] if n.data is None or adesso - n.data <= timedelta(days=7)
+            n
+            for n in [*locali, *google]
+            if n.data is None or adesso - n.data <= timedelta(days=GIORNI_EVENTI)
         ]
         return ordina(senza_doppioni(settimana))

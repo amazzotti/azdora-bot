@@ -26,7 +26,8 @@ Non serve ricordarsi i comandi:
 | Scrivi… | …e l'Azdora |
 |---|---|
 | `45 benzina` · `ho speso 12,50 per la pizza` · `pagato 80€ di bolletta luce` | segna la spesa, indovina la categoria e mostra i pulsanti **🏷️ Cambia categoria** e **↩️ Annulla**. Se correggi una categoria, la volta dopo la sceglie da sola |
-| `ricordami domani alle 18 di chiamare il meccanico` · `ricordami tra 2 ore…` · `ricordami venerdì…` | crea un promemoria e te lo manda all'ora giusta |
+| `ricordami domani alle 18 di chiamare il meccanico` · `ricordami tra 2 ore…` · `ricordami venerdì…` | crea un promemoria e te lo manda all'ora giusta, con i pulsanti **⏰ +1 ora**, **📅 Domani** e **✅ Fatto** |
+| `ricordami ogni lunedì alle 20 di portare fuori la plastica` · `ogni sera…` · `ogni mese il 5…` · `ogni anno il 14/2…` | promemoria **ricorrenti** |
 | 📍 la tua posizione | ti dà meteo, vento, mare e consigli di quel punto, e da lì in poi segue te |
 
 Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `spesa` (o `+`) e `ricordami`: `spesa 60 conad`, `+12 pizza`.
@@ -52,6 +53,8 @@ Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `s
 | `/esporta [anno]` | Il file CSV delle spese dell'anno, pronto per Excel |
 | `/aggiungi latte, pane` · `/lista` · `/svuota` | La lista condivisa: si spunta toccando le voci. Nel gruppo di coppia mostra chi ha aggiunto cosa |
 | `/weekend` | Meteo di sabato e domenica, tre idee per un giro (al coperto se piove) e le sagre ed eventi della settimana |
+| `/sagre` | **Sagre, fiere e feste da Cervia a Pesaro**: il calendario delle feste di sempre del prossimo mese (Fiera dei Becchi a Santarcangelo, Il Pesce fa Festa a Cesenatico, Sapore di Sale a Cervia, Tartufo a Sant'Agata, Presepe della Marineria…) e quelle trovate nei giornali delle ultime due settimane |
+| `/costa` · `/costa domani` | **Tutta la costa in un messaggio**: Cervia e Milano Marittima, Cesenatico, Bellaria, Rimini, Riccione, Cattolica e Gabicce, Pesaro, con tempo, vento e mare |
 | `/budget 800` · `/budget auto 150` | Budget mensile, totale o per categoria. Sotto ogni spesa vedi a che punto sei, con ⚠️ all'80% e 🚨 quando lo superi |
 | `/conti` · `/pareggio` | **Nel gruppo**: ogni spesa ricorda chi l'ha pagata. `/conti` dice chi deve quanto a chi (spese divise in parti uguali, con il minor numero di passaggi); `/pareggio` riparte da zero |
 | `/promemoria` · `/ricordami …` | I promemoria in arrivo, con 🗑 per cancellarli |
@@ -291,6 +294,8 @@ azdora-bot/
 │  ├─ budget.py            # budget mensile e avvisi
 │  ├─ conti.py             # spese divise nel gruppo
 │  ├─ rifiuti.py           # raccolta differenziata
+│  ├─ feste.py             # feste fisse della zona e /sagre
+│  ├─ costa.py             # /costa: da Cervia a Pesaro
 │  ├─ carburante.py        # distributori più economici (open data MIMIT)
 │  ├─ app.py               # monta i pezzi reali
 │  ├─ simula.py            # simulatore da terminale

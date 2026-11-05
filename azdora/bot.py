@@ -20,6 +20,8 @@ from azdora import allerte as modulo_allerte
 from azdora import budget as modulo_budget
 from azdora import carburante as modulo_carburante
 from azdora import conti as modulo_conti
+from azdora import costa as modulo_costa
+from azdora import feste as modulo_feste
 from azdora import lista as modulo_lista
 from azdora import messaggi
 from azdora import notizie as modulo_notizie
@@ -59,7 +61,7 @@ from azdora.promemoria import (
     ErrorePromemoria,
     RegistroPromemoria,
     e_un_promemoria,
-    leggi_promemoria,
+    leggi_ricorrente,
 )
 from azdora.riepilogo import (
     DatiLocalita,
@@ -96,6 +98,8 @@ COMANDI: tuple[tuple[str, str], ...] = (
     ("lista", "La lista condivisa delle cose da fare"),
     ("aggiungi", "Aggiungi alla lista: /aggiungi latte, pane"),
     ("weekend", "Meteo del weekend, gite e sagre"),
+    ("sagre", "Sagre, fiere e feste da Cervia a Pesaro"),
+    ("costa", "Tempo, vento e mare da Cervia a Pesaro"),
     ("budget", "Budget mensile: /budget 800 o /budget auto 150"),
     ("conti", "Nel gruppo: chi deve quanto a chi"),
     ("pareggio", "Nel gruppo: siamo pari, si riparte da zero"),
@@ -227,6 +231,8 @@ class Azdora:
             "aggiungi": self._aggiungi,
             "svuota": self._svuota,
             "weekend": self._weekend,
+            "sagre": self._sagre,
+            "costa": self._costa,
             "budget": self._budget,
             "conti": self._conti,
             "pareggio": self._pareggio,
@@ -837,7 +843,11 @@ class Azdora:
         if self.notizie is not None:
             eventi = self.notizie.eventi(self.orologio())
         testo = modulo_weekend.messaggio_weekend(
-            giorni.get(sabato), giorni.get(domenica), sabato, eventi
+            giorni.get(sabato),
+            giorni.get(domenica),
+            sabato,
+            eventi,
+            modulo_feste.nel_periodo(sabato, domenica),
         )
         self.messaggero.invia_messaggio(chat.id, testo)
 
@@ -876,6 +886,8 @@ class Azdora:
             return avviso
         if azione in {"spcat", "spset", "spann"}:
             return self._pulsante_spesa(chat_id, id_messaggio, azione, valore)
+        if azione in {"prpost", "prok"}:
+            return self._pulsante_promemoria(chat_id, id_messaggio, azione, valore)
         if azione == "prdel":
             RegistroPromemoria(self.archivio, chat_id).elimina(int(valore))
             if id_messaggio is not None:
@@ -1102,8 +1114,8 @@ class Azdora:
     def _crea_promemoria(self, chat: Chat, frase: str) -> None:
         adesso = self.orologio()
         try:
-            quando, cosa = leggi_promemoria(frase, adesso)
-            nuovo = RegistroPromemoria(self.archivio, chat.id).aggiungi(quando, cosa)
+            quando, cosa, ripeti = leggi_ricorrente(frase, adesso)
+            nuovo = RegistroPromemoria(self.archivio, chat.id).aggiungi(quando, cosa, ripeti)
         except ErrorePromemoria as errore:
             self.messaggero.invia_messaggio(chat.id, f"🤔 {errore}.\n\n{modulo_promemoria.USO}")
             return
@@ -1158,7 +1170,11 @@ class Azdora:
         for chat_id in sorted(self.impostazioni.chat_autorizzate):
             try:
                 for voce in RegistroPromemoria(self.archivio, chat_id).scaduti(adesso):
-                    self.messaggero.invia_messaggio(chat_id, modulo_promemoria.avviso(voce))
+                    self.messaggero.invia_messaggio(
+                        chat_id,
+                        modulo_promemoria.avviso(voce),
+                        modulo_promemoria.pulsanti_avviso(voce),
+                    )
                     mandati += 1
             except ErroreTelegram as errore:
                 log.warning("Promemoria non consegnato a %s: %s", chat_id, errore)
@@ -1244,3 +1260,58 @@ class Azdora:
         self.messaggero.invia_messaggio(
             chat.id, modulo_carburante.messaggio(offerte, carburante, localita.nome)
         )
+
+    def _pulsante_promemoria(
+        self, chat_id: int, id_messaggio: int | None, azione: str, valore: str
+    ) -> str | None:
+        """Sotto un promemoria arrivato: ⏰ +1 ora, 📅 domani, ✅ fatto."""
+        id_testo, _, quando = valore.partition(":")
+        registro = RegistroPromemoria(self.archivio, chat_id)
+        testo = registro.testo_consegnato(int(id_testo))
+        if testo is None:
+            return "Questo promemoria è troppo vecchio"
+        adesso = self.orologio()
+        if azione == "prok":
+            nuovo_testo = f"✅ <s>{escape(testo)}</s>"
+            avviso = "✅ Fatto"
+        else:
+            nuovo_quando = (
+                adesso + timedelta(days=1) if quando == "d" else adesso + timedelta(minutes=60)
+            )
+            nuovo = registro.aggiungi(nuovo_quando, testo)
+            leggibile = modulo_promemoria.quando_leggibile(nuovo.quando, adesso)
+            nuovo_testo = f"⏰ <b>{escape(testo)}</b>: te lo ricordo {leggibile}"
+            avviso = f"⏰ Rimandato a {leggibile}"
+        if id_messaggio is not None:
+            self.messaggero.modifica_messaggio(
+                chat_id, id_messaggio, nuovo_testo, {"inline_keyboard": []}
+            )
+        return avviso
+
+    # --- Sagre e costa ----------------------------------------------------------------------
+
+    def _sagre(self, chat: Chat, comando: Comando) -> None:
+        eventi = self.notizie.eventi(self.orologio()) if self.notizie is not None else []
+        self.messaggero.invia_messaggio(
+            chat.id, modulo_feste.messaggio_sagre(self._oggi_data(), eventi)
+        )
+
+    def _costa(self, chat: Chat, comando: Comando) -> None:
+        """Da Cervia a Pesaro: oggi, oppure domani con ``/costa domani``."""
+        domani = comando.testo_argomenti.lower().startswith("doman")
+        giorno = self._oggi_data() + timedelta(days=1 if domani else 0)
+        spiagge = []
+        for localita in modulo_costa.COSTA:
+            previsioni = self._previsioni(localita)
+            mare = self._mare_vicino(localita)
+            spiagge.append(
+                modulo_costa.Spiaggia(
+                    localita.nome,
+                    previsioni,
+                    next((g for g in previsioni.giorni if g.data == giorno), None),
+                    next((g for g in mare.giorni if g.data == giorno), None) if mare else None,
+                    adesso=not domani,
+                )
+            )
+        titolo = "La costa domani" if domani else "La costa oggi"
+        self.messaggero.invia_messaggio(chat.id, modulo_costa.messaggio_costa(spiagge, titolo))
