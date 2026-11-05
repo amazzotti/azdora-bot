@@ -206,7 +206,9 @@ AIUTO = """👋 <b>Ciao, sono l'Azdora!</b> Mando avanti la casa. Scrivimi come 
 /aggiungi latte, pane · /lista – la lista condivisa
 /conti · /pareggio – nel gruppo: chi deve quanto a chi
 /rifiuti – raccolta differenziata, avviso la sera prima
-/promemoria – i tuoi promemoria · /sera – riepilogo delle 20
+/promemoria – i tuoi promemoria · /sera – riepilogo della sera
+/orari – quando ti scrivo (mattino, sera, notizie, silenzio)
+/telefono – posizione automatica dal telefono
 /weekend – meteo, gite e sagre · /sagre – feste da Cervia a Pesaro
 
 Ogni mattina alle 7 ti mando il riepilogo ☕. /id – l'id di questa chat"""
@@ -286,6 +288,17 @@ def titolo_notizie(etichetta: str, nuove: bool) -> str:
 
 def titolo_notizie_riviera(comune: str) -> str:
     return f"🗞️ <b>Le notizie di oggi, da Cesena a Pesaro</b>\n<i>📍 = parla di {escape(comune)}</i>"
+
+
+def titolo_riassunto(etichetta: str, momento) -> str:
+    saluto = (
+        "del mattino"
+        if momento.hour < 12
+        else "di mezzogiorno"
+        if momento.hour < 15
+        else ("del pomeriggio" if momento.hour < 18 else "della sera")
+    )
+    return f"🗞️ <b>Le notizie {saluto}</b> · <i>📍 = {escape(etichetta)}</i>"
 
 
 def nessuna_notizia(etichetta: str) -> str:

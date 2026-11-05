@@ -146,7 +146,7 @@ def test_piccoli_spostamenti_live_non_richiedono_il_nome(bot, archivio, luoghi):
 
 def test_aggiornamenti_live_da_sconosciuti_ignorati(bot, archivio):
     bot.gestisci_update(_aggiornamento_live(*BOLOGNA_XY, chat_id=SCONOSCIUTO))
-    assert archivio.chiavi() == []
+    assert [k for k in archivio.chiavi() if not k.startswith("orari:")] == []
 
 
 def test_messaggi_modificati_senza_posizione_ignorati(bot, messaggero):
@@ -331,10 +331,12 @@ def test_controllo_allerte_segue_la_regione(bot, allerte, luoghi):
 def test_controlli_completi(bot, messaggero, notizie, allerte):
     notizie.notizie = [notizia(1)]
     allerte.allerte_attive = [allerta(4)]
-    bot.controlli()
+    bot.controlli()  # alle 7: riepilogo del mattino (con le notizie), poi le allerte
     testi = [t for _, t in messaggero.inviati]
-    assert "Allerta rossa" in testi[0]
-    assert "Novità da Riccione" in testi[1]
+    riepilogo = next(t for t in testi if "Buongiorno" in t)
+    assert "Notizia numero 1" in riepilogo  # le prime notizie stanno nel riepilogo
+    assert any("Allerta rossa" in t for t in testi)
+    assert not any("Novità da Riccione" in t for t in testi)  # già date: niente doppioni
 
 
 def test_controlli_resistono_ai_guasti(impostazioni, messaggero, meteo, notizie):
@@ -477,3 +479,13 @@ def test_notizie_di_una_frazione_senza_notizie_usano_il_comune(bot, messaggero, 
     bot.gestisci_update(messaggio("/notizie mima"))
     assert bot.notizie.richieste == ["Milano Marittima", "Cervia"]
     assert "Cervia (per Milano Marittima)" in messaggero.ultimo
+
+
+@pytest.fixture(autouse=True)
+def notizie_subito(archivio):
+    """In questi test le notizie arrivano "subito" (una volta al giro), come prima di /orari."""
+    from azdora.orari import Orari, PreferenzeOrari
+
+    preferenze = PreferenzeOrari(archivio)
+    for chat in (111, 333, 444):
+        preferenze.salva(chat, Orari(notizie_subito=True, silenzio_da=None, silenzio_a=None))

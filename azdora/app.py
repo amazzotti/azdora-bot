@@ -13,6 +13,7 @@ from azdora.carburante import Osservaprezzi
 from azdora.config import Impostazioni
 from azdora.luoghi import Luoghi
 from azdora.meteo.aria import OpenMeteoAria
+from azdora.meteo.imminente import OpenMeteoImminente
 from azdora.meteo.openmeteo import OpenMeteo
 from azdora.notizie import LettoreNotizie
 from azdora.telegram import Telegram
@@ -50,4 +51,5 @@ def crea_azdora(impostazioni: Impostazioni, http: httpx.Client) -> Azdora:
         allerte=Meteoalarm(http),
         aria=OpenMeteoAria(http),
         carburante=Osservaprezzi(http),
+        imminente=OpenMeteoImminente(http),
     )

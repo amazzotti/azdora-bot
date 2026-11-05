@@ -208,9 +208,9 @@ def test_se_qualcuno_blocca_il_bot_gli_altri_ricevono_lo_stesso(
         allerte=AllerteFinte(),
         orologio=lambda: ADESSO,
     )
+    assert bot.controlla_notizie() == 2
     bot.invia_riepilogo_mattutino()
     assert {chat for chat, _ in messaggero.inviati} >= {PADRONE, FIDANZATA}
-    assert bot.controlla_notizie() == 2
     assert bot.controlla_allerte() == 2
 
 
@@ -253,3 +253,13 @@ def test_il_gruppo_con_il_babbo_ha_la_sua_lista(impostazioni, messaggero, meteo,
 def test_gruppo_non_in_lista_resta_fuori(bot, messaggero):
     bot.gestisci_update(messaggio("/lista", chat_id=-999, tipo="group", mittente=BABBO))
     assert messaggero.uscite == [-999]
+
+
+@pytest.fixture(autouse=True)
+def notizie_subito(archivio):
+    """In questi test le notizie arrivano "subito" (una volta al giro), come prima di /orari."""
+    from azdora.orari import Orari, PreferenzeOrari
+
+    preferenze = PreferenzeOrari(archivio)
+    for chat in (111, 333, 444):
+        preferenze.salva(chat, Orari(notizie_subito=True, silenzio_da=None, silenzio_a=None))

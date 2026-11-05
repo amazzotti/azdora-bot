@@ -67,7 +67,10 @@ def gestisci_webhook(
 
 
 LAVORI: dict[str, Callable[[Azdora], object]] = {
-    "mattino": Azdora.invia_riepilogo_mattutino,
+    # Rispetta l'orario scelto da ognuno con /orari (di default le 7).
+    "mattino": lambda bot: bot.controlla_mattino(anche_senza_memoria=True),
+    # Subito e a tutti: per provare (workflow "Prova riepilogo").
+    "mattino-subito": Azdora.invia_riepilogo_mattutino,
     "controlli": Azdora.controlli,  # allerte + notizie, ogni 15 minuti
     "notizie": Azdora.controlla_notizie,
     "allerte": Azdora.controlla_allerte,
@@ -96,3 +99,39 @@ def gestisci_cron(
         log.exception("Errore nel lavoro %s", nome)
         return Risposta(500, {"ok": False, "job": nome})
     return Risposta(200, {"ok": True, "job": nome})
+
+
+def gestisci_posizione(
+    intestazioni: Mapping[str, str] | Any,
+    corpo: bytes,
+    crea_bot: Callable[[], Azdora],
+) -> Risposta:
+    """``POST /api/posizione``: il telefono manda {"lat": …, "lon": …} con la sua chiave."""
+    from azdora.telefono import CollegamentiTelefono
+
+    autorizzazione = _minuscole(intestazioni).get("authorization", "")
+    if not autorizzazione.startswith("Bearer "):
+        return Risposta(401, {"ok": False, "errore": "manca la chiave (Authorization: Bearer …)"})
+    chiave = autorizzazione.removeprefix("Bearer ").strip()
+    if not chiave:
+        return Risposta(401, {"ok": False, "errore": "manca la chiave (Authorization: Bearer …)"})
+    try:
+        dati = json.loads(corpo or b"{}")
+        lat = float(dati.get("lat", dati.get("latitude")))
+        lon = float(dati.get("lon", dati.get("longitude")))
+    except (ValueError, TypeError, AttributeError):
+        return Risposta(
+            400, {"ok": False, "errore": 'serve un JSON come {"lat": 44.0, "lon": 12.6}'}
+        )
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return Risposta(400, {"ok": False, "errore": "coordinate fuori scala"})
+    bot = crea_bot()
+    chat_id = CollegamentiTelefono(bot.archivio).chat_di(chiave)
+    if chat_id is None or chat_id not in bot.impostazioni.chat_autorizzate:
+        return Risposta(401, {"ok": False, "errore": "chiave non valida"})
+    try:
+        posizione = bot.salva_posizione(chat_id, lat, lon)
+    except Exception:
+        log.exception("Posizione dal telefono non salvata")
+        return Risposta(500, {"ok": False})
+    return Risposta(200, {"ok": True, "luogo": posizione.etichetta})

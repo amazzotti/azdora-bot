@@ -7,6 +7,7 @@ si sostituiscono con dei finti e nel simulatore con la console.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -25,10 +26,12 @@ from azdora import feste as modulo_feste
 from azdora import lista as modulo_lista
 from azdora import messaggi
 from azdora import notizie as modulo_notizie
+from azdora import orari as modulo_orari
 from azdora import promemoria as modulo_promemoria
 from azdora import rifiuti as modulo_rifiuti
 from azdora import scadenze as modulo_scadenze
 from azdora import spese as modulo_spese
+from azdora import telefono as modulo_telefono
 from azdora import weekend as modulo_weekend
 from azdora.allerte import FonteAllerte
 from azdora.archivio import Archivio, ArchivioMemoria, ErroreArchivio
@@ -47,8 +50,10 @@ from azdora.linguaggio import leggi_spesa_libera
 from azdora.lista import Lista, leggi_voci
 from azdora.luoghi import CercaLuoghi, Luogo, distanza_km, localita_qui
 from azdora.meteo.aria import FonteAria, avvisi_aria, messaggio_aria
+from azdora.meteo.imminente import FonteImminente, valuta
 from azdora.meteo.openmeteo import ErroreMeteo, FonteMeteo, PrevisioniMare
 from azdora.notizie import FonteNotizie, Notizia
+from azdora.orari import ErroreOrari, Orari, PreferenzeOrari, in_orario, in_silenzio
 from azdora.posizione import (
     SPOSTAMENTO_MINIMO_KM,
     VALIDITA_ZONA,
@@ -73,6 +78,7 @@ from azdora.rifiuti import Calendario, leggi_rifiuti
 from azdora.scadenze import RegistroScadenze, leggi_scadenza
 from azdora.soldi import aggiungi_mesi, euro, leggi_mese
 from azdora.spese import RegistroSpese, leggi_spesa
+from azdora.telefono import CollegamentiTelefono
 from azdora.telegram import ErroreTelegram, Messaggero
 
 log = logging.getLogger(__name__)
@@ -100,6 +106,8 @@ COMANDI: tuple[tuple[str, str], ...] = (
     ("weekend", "Meteo del weekend, gite e sagre"),
     ("sagre", "Sagre, fiere e feste da Cervia a Pesaro"),
     ("costa", "Tempo, vento e mare da Cervia a Pesaro"),
+    ("orari", "Quando ti scrivo: mattino, sera, notizie, silenzio"),
+    ("telefono", "Posizione automatica dal telefono"),
     ("budget", "Budget mensile: /budget 800 o /budget auto 150"),
     ("conti", "Nel gruppo: chi deve quanto a chi"),
     ("pareggio", "Nel gruppo: siamo pari, si riparte da zero"),
@@ -127,7 +135,9 @@ MASSIMO_NOTIZIE_ZONA_NUOVA = 3
 NOTIZIE_A_RICHIESTA = 10  # con /notizie se ne vedono di più che negli avvisi automatici
 RICORDO_NOTIZIE_S = 3 * 24 * 3600
 RICORDO_ZONA_S = 30 * 24 * 3600
-ORA_DELLA_SERA = 20  # rifiuti e riepilogo della sera
+NOTIZIE_NEL_MATTINO = 3
+NOTIZIE_NEL_RIASSUNTO = 8
+PAUSA_AVVISI_S = 4 * 3600  # lo stesso avviso meteo non prima di 4 ore
 # Come li chiamano tutti in Romagna → il nome vero, per cercarli.
 SOPRANNOMI = {
     "mima": "Milano Marittima",
@@ -189,6 +199,7 @@ class Azdora:
         allerte: FonteAllerte | None = None,
         aria: FonteAria | None = None,
         carburante: FonteCarburante | None = None,
+        imminente: FonteImminente | None = None,
         orologio: Callable[[], datetime] = adesso_a_roma,
     ) -> None:
         self.impostazioni = impostazioni
@@ -201,6 +212,8 @@ class Azdora:
         self.allerte = allerte
         self.aria = aria
         self.carburante = carburante
+        self.imminente = imminente
+        self.orari = PreferenzeOrari(self.archivio)
         self.orologio = orologio
         # Previsioni già scaricate in questa richiesta: con più persone non si riscarica.
         self._cache_previsioni: dict[tuple[float, float], Any] = {}
@@ -233,6 +246,8 @@ class Azdora:
             "weekend": self._weekend,
             "sagre": self._sagre,
             "costa": self._costa,
+            "orari": self._orari,
+            "telefono": self._telefono,
             "budget": self._budget,
             "conti": self._conti,
             "pareggio": self._pareggio,
@@ -439,20 +454,26 @@ class Azdora:
             return
         lat, lon = float(posizione["latitude"]), float(posizione["longitude"])
         try:
-            precedente = self.posizioni.leggi(chat_id)
-            spostato = precedente is None or (
-                distanza_km(precedente.lat, precedente.lon, lat, lon) >= SPOSTAMENTO_MINIMO_KM
-            )
-            if spostato or not precedente.comune:
-                luogo = self._luogo(lat, lon)
-            else:
-                # Ancora nello stesso posto: niente richiesta a Nominatim, si tiene il nome.
-                luogo = Luogo(
-                    precedente.comune, precedente.provincia, precedente.regione, precedente.paese
-                )
-            self.posizioni.salva(chat_id, self._nuova_posizione(lat, lon, luogo, True))
+            self.salva_posizione(chat_id, lat, lon)
         except ErroreArchivio as errore:
             log.warning("Posizione in tempo reale non salvata: %s", errore)
+
+    def salva_posizione(self, chat_id: int, lat: float, lon: float) -> Posizione:
+        """Salva in silenzio una posizione (in tempo reale o dal telefono)."""
+        precedente = self.posizioni.leggi(chat_id)
+        spostato = precedente is None or (
+            distanza_km(precedente.lat, precedente.lon, lat, lon) >= SPOSTAMENTO_MINIMO_KM
+        )
+        if spostato or not precedente.comune:
+            luogo = self._luogo(lat, lon)
+        else:
+            # Ancora nello stesso posto: niente richiesta a Nominatim, si tiene il nome.
+            luogo = Luogo(
+                precedente.comune, precedente.provincia, precedente.regione, precedente.paese
+            )
+        nuova = self._nuova_posizione(lat, lon, luogo, True)
+        self.posizioni.salva(chat_id, nuova)
+        return nuova
 
     def zona(self, chat_id: int | None = None) -> Zona:
         """La zona attuale di una persona (di default il padrone): dove si trova, o casa."""
@@ -647,20 +668,13 @@ class Azdora:
         """Il messaggio delle 7, a ogni persona con il suo nome e la sua zona;
         poi promemoria delle scadenze e (il 1°) il resoconto delle spese."""
         for chat_id in self._persone():
-            try:
-                testo = self.testo_oggi(
-                    saluta=True,
-                    zona=self._zona_sicura(chat_id),
-                    nome=self.nome_di(chat_id),
-                )
-            except ErroreMeteo as errore:
-                log.error("Riepilogo mattutino senza meteo: %s", errore)
-                testo = messaggi.METEO_NON_DISPONIBILE
-            try:
-                self.messaggero.invia_messaggio(chat_id, testo)
-            except ErroreTelegram as errore:
-                # Es. un familiare ha bloccato il bot: gli altri lo ricevono lo stesso.
-                log.warning("Riepilogo non consegnato a %s: %s", chat_id, errore)
+            # Es. un familiare ha bloccato il bot: gli altri lo ricevono lo stesso.
+            self._riepilogo_per(chat_id)
+            with contextlib.suppress(ErroreArchivio):
+                self.archivio.segna_nuovi([f"mattino:{chat_id}:{self._oggi_data()}"], 2 * 24 * 3600)
+        self._promemoria_scadenze_e_resoconti()
+
+    def _promemoria_scadenze_e_resoconti(self) -> None:
         for chat in sorted(self.impostazioni.chat_autorizzate, reverse=True):
             try:
                 self.invia_promemoria_scadenze(chat)
@@ -951,6 +965,12 @@ class Azdora:
 
     def _notizie_per(self, chat_id: int) -> int:
         assert self.notizie is not None
+        orari = self.orari.di(chat_id)
+        adesso = self.orologio()
+        if in_silenzio(orari, adesso):
+            return 0
+        if not orari.notizie_subito:
+            return self._riassunto_notizie(chat_id, orari, adesso)
         zona = self.zona(chat_id)
         trovate = self.notizie.notizie_per(zona.comune, zona.lat, zona.lon, self.orologio())
         # La prima volta in una zona non si manda tutto l'arretrato: solo le ultime.
@@ -991,6 +1011,9 @@ class Azdora:
             return 0
         adesso = self.orologio()
         attive = modulo_allerte.per_regione(self.allerte.allerte(zona.paese), zona.regione, adesso)
+        if in_silenzio(self.orari.di(chat_id), adesso):
+            # Di notte si sveglia qualcuno solo per allerte arancioni o rosse.
+            attive = [a for a in attive if a.livello >= 3]
         nuove = []
         for allerta in attive:
             durata = (allerta.fine - adesso).total_seconds() if allerta.fine else 3 * 24 * 3600
@@ -1010,7 +1033,9 @@ class Azdora:
         """Il giro di controlli periodico: promemoria, allerte, notizie e (alle 20) la sera."""
         for controllo in (
             self.controlla_promemoria,
+            self.controlla_mattino,
             self.controlla_allerte,
+            self.controlla_imminente,
             self.controlla_notizie,
             self.controlla_sera,
         ):
@@ -1183,11 +1208,13 @@ class Azdora:
     def controlla_sera(self) -> int:
         """Alle 20: rifiuti da portare fuori e, se attivo, il riepilogo di domani."""
         adesso = self.orologio()
-        if adesso.hour != ORA_DELLA_SERA or not self._serve_memoria("Sera"):
+        if not self._serve_memoria("Sera"):
             return 0
         domani = adesso.date() + timedelta(days=1)
         mandati = 0
         for chat_id in sorted(self.impostazioni.chat_autorizzate):
+            if not in_orario(adesso, self.orari.di(chat_id).sera):
+                continue
             (nuova,) = self.archivio.segna_nuovi([f"sera:{chat_id}:{adesso.date()}"], 2 * 24 * 3600)
             if not nuova:
                 continue
@@ -1315,3 +1342,155 @@ class Azdora:
             )
         titolo = "La costa domani" if domani else "La costa oggi"
         self.messaggero.invia_messaggio(chat.id, modulo_costa.messaggio_costa(spiagge, titolo))
+
+    # --- Orari, riassunti, avvisi imminenti, telefono ---------------------------------------
+
+    def _orari(self, chat: Chat, comando: Comando) -> None:
+        orari = self.orari.di(chat.id)
+        if comando.argomenti:
+            try:
+                orari = modulo_orari.modifica(orari, comando.argomenti)
+            except ErroreOrari as errore:
+                self.messaggero.invia_messaggio(
+                    chat.id, f"🤔 {escape(str(errore))}.\n\n{modulo_orari.USO}"
+                )
+                return
+            self.orari.salva(chat.id, orari)
+        self.messaggero.invia_messaggio(
+            chat.id, modulo_orari.messaggio(orari, per_gruppo=chat.e_un_gruppo)
+        )
+
+    def controlla_mattino(self, anche_senza_memoria: bool = False) -> int:
+        """Il riepilogo del mattino, a ognuno all'ora che ha scelto (una volta al giorno)."""
+        if not self.archivio.persistente and not anche_senza_memoria:
+            return 0
+        adesso = self.orologio()
+        mandati = 0
+        for chat_id in self._persone():
+            mattino = self.orari.di(chat_id).mattino
+            if mattino is None or not in_orario(adesso, mattino):
+                continue
+            (nuovo,) = self.archivio.segna_nuovi(
+                [f"mattino:{chat_id}:{adesso.date()}"], 2 * 24 * 3600
+            )
+            if nuovo:
+                self._riepilogo_per(chat_id)
+                mandati += 1
+        if mandati:
+            self._promemoria_scadenze_e_resoconti()
+        return mandati
+
+    def _riepilogo_per(self, chat_id: int) -> None:
+        try:
+            testo = self.testo_oggi(
+                saluta=True, zona=self._zona_sicura(chat_id), nome=self.nome_di(chat_id)
+            )
+            testo = self._aggiungi_extra_mattino(chat_id, testo)
+        except ErroreMeteo as errore:
+            log.error("Riepilogo mattutino senza meteo: %s", errore)
+            testo = messaggi.METEO_NON_DISPONIBILE
+        try:
+            self.messaggero.invia_messaggio(chat_id, testo)
+        except ErroreTelegram as errore:
+            log.warning("Riepilogo non consegnato a %s: %s", chat_id, errore)
+
+    def _aggiungi_extra_mattino(self, chat_id: int, testo: str) -> str:
+        """In fondo al riepilogo: i promemoria di oggi e le prime notizie."""
+        parti = [testo]
+        try:
+            oggi = self._oggi_data()
+            if voci := RegistroPromemoria(self.archivio, chat_id).del_giorno(oggi):
+                parti.append(
+                    "⏰ <b>Oggi</b>\n"
+                    + "\n".join(f"• {p.quando:%H:%M} {escape(p.testo)}" for p in voci)
+                )
+            if (
+                self.notizie is not None
+                and self.archivio.persistente
+                and (nuove := self._notizie_nuove(chat_id, NOTIZIE_NEL_MATTINO))
+            ):
+                parti.append(modulo_notizie.formatta_breve(nuove, "🗞️ <b>Le prime notizie</b>"))
+        except ErroreArchivio as errore:
+            log.warning("Extra del mattino saltati: %s", errore)
+        return "\n\n".join(p for p in parti if p)
+
+    def _notizie_nuove(self, chat_id: int, quante: int) -> list[Notizia]:
+        """Le notizie non ancora mandate a questa persona: il suo comune, poi la zona."""
+        assert self.notizie is not None
+        zona = self.zona(chat_id)
+        adesso = self.orologio()
+        trovate = list(self.notizie.notizie_per(zona.comune, zona.lat, zona.lon, adesso))
+        if modulo_notizie.in_zona(zona.lat, zona.lon):
+            trovate += self.notizie.del_giorno_in_riviera(zona.comune, adesso)
+        trovate = modulo_notizie.senza_doppioni(trovate)
+        if not trovate:
+            return []
+        nuove_flag = self.archivio.segna_nuovi(
+            [f"notizia:{chat_id}:{n.impronta}" for n in trovate], RICORDO_NOTIZIE_S
+        )
+        nuove = [n for n, nuova in zip(trovate, nuove_flag, strict=True) if nuova]
+        return modulo_notizie.prima_quelle_di(nuove, zona.comune)[:quante]
+
+    def _riassunto_notizie(self, chat_id: int, orari: Orari, adesso: datetime) -> int:
+        """Agli orari scelti: un solo messaggio con le notizie nuove (non una per volta)."""
+        momento = next(
+            (t for t in orari.notizie if in_orario(adesso, t, modulo_orari.FINESTRA_NOTIZIE)),
+            None,
+        )
+        if momento is None:
+            return 0
+        (nuovo,) = self.archivio.segna_nuovi(
+            [f"riassunto:{chat_id}:{adesso.date()}:{momento:%H%M}"], 2 * 24 * 3600
+        )
+        if not nuovo:
+            return 0
+        notizie = self._notizie_nuove(chat_id, NOTIZIE_NEL_RIASSUNTO)
+        if not notizie:
+            return 0
+        zona = self.zona(chat_id)
+        titolo = messaggi.titolo_riassunto(zona.etichetta, momento)
+        self.messaggero.invia_messaggio(
+            chat_id, modulo_notizie.formatta(notizie, titolo, evidenzia=zona.comune)
+        )
+        return len(notizie)
+
+    def controlla_imminente(self) -> int:
+        """Pioggia, temporali, neve, raffiche nelle prossime 2 ore, per dove sei."""
+        if self.imminente is None or not self._serve_memoria("Avvisi meteo"):
+            return 0
+        adesso = self.orologio()
+        mandati = 0
+        for chat_id in self._persone():
+            orari = self.orari.di(chat_id)
+            if not orari.avvisi_meteo or in_silenzio(orari, adesso):
+                continue
+            zona = self.zona(chat_id)
+            avvisi = valuta(self.imminente.quarti(zona.lat, zona.lon), zona.etichetta, adesso)
+            if not avvisi:
+                continue
+            nuovi_flag = self.archivio.segna_nuovi(
+                [f"imminente:{chat_id}:{a.tipo}" for a in avvisi], PAUSA_AVVISI_S
+            )
+            nuovi = [a for a, nuovo in zip(avvisi, nuovi_flag, strict=True) if nuovo]
+            if nuovi:
+                try:
+                    self.messaggero.invia_messaggio(chat_id, "\n\n".join(a.testo for a in nuovi))
+                    mandati += len(nuovi)
+                except ErroreTelegram as errore:
+                    log.warning("Avviso meteo non consegnato a %s: %s", chat_id, errore)
+        return mandati
+
+    def _telefono(self, chat: Chat, comando: Comando) -> None:
+        if chat.e_un_gruppo:
+            self.messaggero.invia_messaggio(chat.id, modulo_telefono.USO_SOLO_PRIVATO)
+            return
+        collegamenti = CollegamentiTelefono(self.archivio)
+        if comando.testo_argomenti.lower() in {"off", "no", "spegni", "stop"}:
+            testo = (
+                modulo_telefono.SPENTO if collegamenti.revoca(chat.id) else modulo_telefono.NESSUNO
+            )
+            self.messaggero.invia_messaggio(chat.id, testo)
+            return
+        chiave = collegamenti.crea(chat.id)
+        indirizzo = self.impostazioni.indirizzo or "https://il-tuo-progetto.vercel.app"
+        self.messaggero.invia_messaggio(chat.id, modulo_telefono.istruzioni(indirizzo, chiave))

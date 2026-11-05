@@ -94,6 +94,15 @@ def _leggi_lista_chat(env: Mapping[str, str], nome: str) -> tuple[int, ...]:
         ) from errore
 
 
+def _indirizzo(env: Mapping[str, str]) -> str:
+    """AZDORA_URL, oppure l'indirizzo di produzione che Vercel mette da solo nell'ambiente."""
+    if valore := env.get("AZDORA_URL", "").strip():
+        return valore.rstrip("/")
+    if dominio := env.get("VERCEL_PROJECT_PRODUCTION_URL", "").strip():
+        return f"https://{dominio}"
+    return ""
+
+
 @dataclass(frozen=True)
 class Impostazioni:
     """Tutto quello che il bot legge dall'ambiente."""
@@ -112,6 +121,8 @@ class Impostazioni:
     # Upstash Redis: la memoria del bot (posizione, notizie già mandate, ...).
     archivio_url: str = ""
     archivio_token: str = ""
+    # Indirizzo pubblico (es. https://azdora-bot.vercel.app), per spiegare /telefono.
+    indirizzo: str = ""
 
     @classmethod
     def da_env(cls, env: Mapping[str, str] | None = None) -> Impostazioni:
@@ -130,6 +141,7 @@ class Impostazioni:
             archivio_url=(
                 env.get("UPSTASH_REDIS_REST_URL") or env.get("KV_REST_API_URL") or ""
             ).strip(),
+            indirizzo=_indirizzo(env),
             archivio_token=(
                 env.get("UPSTASH_REDIS_REST_TOKEN") or env.get("KV_REST_API_TOKEN") or ""
             ).strip(),

@@ -35,6 +35,7 @@ from azdora.carburante import Osservaprezzi
 from azdora.config import FUSO_ORARIO, Impostazioni, Localita
 from azdora.luoghi import Luoghi, Luogo, leggi_luogo_inverso, leggi_ricerca
 from azdora.meteo.aria import OpenMeteoAria
+from azdora.meteo.imminente import OpenMeteoImminente
 from azdora.meteo.openmeteo import (
     FonteMeteo,
     OpenMeteo,
@@ -243,6 +244,7 @@ def main(argomenti: list[str] | None = None) -> int:
                 allerte=Meteoalarm(http),
                 aria=OpenMeteoAria(http),
                 carburante=Osservaprezzi(http),
+                imminente=OpenMeteoImminente(http),
             )
 
         for testo in scelte.messaggi:

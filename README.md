@@ -55,6 +55,8 @@ Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `s
 | `/weekend` | Meteo di sabato e domenica, tre idee per un giro (al coperto se piove) e le sagre ed eventi della settimana |
 | `/sagre` | **Sagre, fiere e feste da Cervia a Pesaro**: il calendario delle feste di sempre del prossimo mese (Fiera dei Becchi a Santarcangelo, Il Pesce fa Festa a Cesenatico, Sapore di Sale a Cervia, Tartufo a Sant'Agata, Presepe della Marineria…) e quelle trovate nei giornali delle ultime due settimane |
 | `/costa` · `/costa domani` | **Tutta la costa in un messaggio**: Cervia e Milano Marittima, Cesenatico, Bellaria, Rimini, Riccione, Cattolica e Gabicce, Pesaro, con tempo, vento e mare |
+| `/orari` | **Quando ti scrivo**: `/orari mattino 6:30`, `/orari sera 21`, `/orari notizie 8 13 19` (riassunti) o `/orari notizie subito`, `/orari silenzio 23-7`, `/orari avvisi off`. Ognuno della famiglia ha i suoi |
+| `/telefono` | Ti dà una chiave personale per far mandare la **posizione in automatico** dal telefono (Comandi Rapidi su iPhone, HTTP Shortcuts o Tasker su Android), con le istruzioni passo passo. `/telefono off` la disattiva |
 | `/budget 800` · `/budget auto 150` | Budget mensile, totale o per categoria. Sotto ogni spesa vedi a che punto sei, con ⚠️ all'80% e 🚨 quando lo superi |
 | `/conti` · `/pareggio` | **Nel gruppo**: ogni spesa ricorda chi l'ha pagata. `/conti` dice chi deve quanto a chi (spese divise in parti uguali, con il minor numero di passaggi); `/pareggio` riparte da zero |
 | `/promemoria` · `/ricordami …` | I promemoria in arrivo, con 🗑 per cancellarli |
@@ -67,10 +69,14 @@ Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `s
 
 **Senza località, i comandi usano il posto in cui sei**: l'ultima posizione che hai mandato negli ultimi 3 giorni. Se non sa dove sei, usa casa (Riccione). Nel gruppo di coppia vale la posizione del gruppo o, se manca, la tua.
 
-In più, da sola:
-- **ogni mattina alle 7** l'Azdora manda il riepilogo della giornata. Se sei lontano da casa, aggiunge il meteo di dove sei; se ci sono allerte, le mette in fondo. Poi arrivano i **promemoria delle scadenze**: 30, 7 e 1 giorno prima, il giorno stesso, e se sono scadute e non pagate. Il **1° del mese** arriva anche il **resoconto delle spese** del mese prima;
-- **ogni 15 minuti** consegna i **promemoria** arrivati all'ora giusta e controlla se ci sono **notizie nuove** sul comune in cui ti trovi e **allerte nuove** nella tua regione. Non ti manda mai due volte la stessa cosa;
-- **alle 20** ti ricorda i **rifiuti** da portare fuori e, se hai attivato `/sera`, ti manda il riepilogo di domani.
+In più, da sola, **agli orari che scegli con `/orari`**:
+- **ogni mattina** (di default alle 7) l'Azdora manda il riepilogo della giornata, con in fondo i **promemoria di oggi** e le **prime notizie**. Se sei lontano da casa, aggiunge il meteo di dove sei; se ci sono allerte, le mette in fondo. Poi arrivano i **promemoria delle scadenze**: 30, 7 e 1 giorno prima, il giorno stesso, e se sono scadute e non pagate. Il **1° del mese** arriva anche il **resoconto delle spese** del mese prima;
+- **ogni 15 minuti** consegna i **promemoria** arrivati all'ora giusta, controlla le **allerte** della tua regione e ti avvisa se **sta per piovere**, se arriva un **temporale**, la **neve** o **raffiche** forti nelle prossime 2 ore, dove sei tu (previsioni a 15 minuti di Open-Meteo, lo stesso avviso al massimo ogni 4 ore);
+- **le notizie** arrivano in un **riassunto completo** (fino a 8, il tuo comune per primo) alle 12:30 e alle 19, oppure una per volta appena escono, se scegli `/orari notizie subito`. Non ti manda mai due volte la stessa cosa;
+- nelle **ore di silenzio** (di default 23–7) niente notizie né avvisi: passano solo i promemoria e le allerte arancioni e rosse;
+- **la sera** (di default alle 20) ti ricorda i **rifiuti** da portare fuori e, se hai attivato `/sera`, ti manda il riepilogo di domani.
+
+**Chi decide quando arrivano?** La sveglia di cron-job.org chiama il bot ogni 15 minuti. A ogni giro il bot guarda gli orari di ognuno e manda solo quello che è arrivato il momento di mandare, una volta sola. Il cronjob delle 7 (`job=mattino`) può restare: rispetta comunque gli orari di `/orari`.
 
 Ecco un riepilogo vero:
 
@@ -270,7 +276,8 @@ python -m azdora.simula --offline /domani    # con i dati salvati, senza interne
 azdora-bot/
 ├─ api/                    # funzioni serverless di Vercel
 │  ├─ webhook.py           #   POST /api/webhook  ← Telegram
-│  └─ cron.py              #   GET  /api/cron     ← cron-job.org
+│  ├─ cron.py              #   GET  /api/cron     ← cron-job.org
+│  └─ posizione.py         #   POST /api/posizione ← il tuo telefono
 ├─ azdora/
 │  ├─ bot.py               # comandi, permessi, riepiloghi
 │  ├─ messaggi.py          # testi in HTML di Telegram
@@ -296,6 +303,8 @@ azdora-bot/
 │  ├─ rifiuti.py           # raccolta differenziata
 │  ├─ feste.py             # feste fisse della zona e /sagre
 │  ├─ costa.py             # /costa: da Cervia a Pesaro
+│  ├─ orari.py             # /orari: mattino, sera, notizie, silenzio
+│  ├─ telefono.py          # posizione automatica dal telefono
 │  ├─ carburante.py        # distributori più economici (open data MIMIT)
 │  ├─ app.py               # monta i pezzi reali
 │  ├─ simula.py            # simulatore da terminale
@@ -306,6 +315,7 @@ azdora-bot/
 │     ├─ vento.py          # rosa dei venti, nodi, Beaufort
 │     ├─ mare.py           # scala Douglas
 │     ├─ aria.py           # UV, qualità dell'aria, pollini
+│     ├─ imminente.py      # "sta per piovere": avvisi a 15 minuti
 │     └─ codici_wmo.py     # codici meteo → testo ed emoji
 ├─ tests/                  # pytest + respx, con risposte vere (meteo, feed, allerte) in fixtures/
 └─ .github/workflows/      # CI, "Configura bot", "Prova riepilogo"
@@ -320,7 +330,8 @@ azdora-bot/
 - [x] **Tappa 4: spese mensili.** `/spesa 45 benzina`, riepilogo per categoria, resoconto il 1° del mese, esportazione in CSV.
 - [x] **Tappa 5: chat di coppia.** Lista condivisa con le spunte, idee per il weekend: giri della domenica, sagre ed eventi in Romagna, con il meteo.
 - [x] **Più utile**: spese e promemoria scritti come si parla, categorie che imparano, budget, conti di coppia, raccolta differenziata, riepilogo della sera, UV e pollini, carburante più economico. Idee prese da bot open source come [MyDollarBot](https://github.com/mtkumar123/MyDollarBot), [SmartSpend2](https://github.com/CSC510-G35-Fall2022/SmartSpend2) e [Spliit](https://github.com/spliit-app/spliit), riscritte da zero.
-- [ ] **Prossime idee**: posizione inviata in automatico dal telefono (Comandi Rapidi / Tasker), treni Riccione–Bologna, grafico delle spese, foto dello scontrino.
+- [x] **Su misura**: orari personali e ore di silenzio, riassunti delle notizie, avvisi "sta per piovere", posizione automatica dal telefono, promemoria ricorrenti con rimanda.
+- [ ] **Prossime idee**: treni Riccione–Bologna, grafico delle spese, foto dello scontrino.
 
 ## 🙏 Fonti dei dati
 
@@ -360,9 +371,10 @@ azdora-bot/
 - **Zero cost** on free tiers. Secrets live only in environment variables, never in the code.
 - **Quality:**
   - business logic is decoupled from infrastructure through small protocols;
-  - 570+ pytest tests, using real recorded API responses and respx HTTP mocks, including an end-to-end test of the Vercel handlers;
+  - 650+ pytest tests, using real recorded API responses and respx HTTP mocks, including an end-to-end test of the Vercel handlers;
   - ruff lint and format checks;
   - GitHub Actions CI.
-- **Next ideas:** automatic location from the phone, train delays, spending charts, receipt photos.
+- **Also:** per-person schedules and quiet hours, news digests, 15-minute rain/storm/gust nowcast alerts, automatic location from the phone (iOS Shortcuts / Android), recurring reminders with snooze.
+- **Next ideas:** train delays, spending charts, receipt photos.
 
 Licensed under the [MIT License](LICENSE).

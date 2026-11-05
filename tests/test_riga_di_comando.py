@@ -107,7 +107,7 @@ def test_lavoro_mattino_da_riga_di_comando(env_telegram, json_previsioni, json_m
     invio = respx.post(f"{BASE}/sendMessage").mock(
         return_value=httpx.Response(200, json={"ok": True, "result": {}})
     )
-    assert lavori.main(["mattino"]) == 0
+    assert lavori.main(["mattino-subito"]) == 0
     assert invio.call_count == 1
     assert "completato" in capsys.readouterr().out
 
