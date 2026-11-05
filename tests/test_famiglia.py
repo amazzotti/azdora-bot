@@ -209,3 +209,44 @@ def test_se_qualcuno_blocca_il_bot_gli_altri_ricevono_lo_stesso(
     assert {chat for chat, _ in messaggero.inviati} >= {PADRONE, FIDANZATA}
     assert bot.controlla_notizie() == 2
     assert bot.controlla_allerte() == 2
+
+
+# --- Altri gruppi --------------------------------------------------------------------------
+
+GRUPPO_BABBO = -777
+
+
+def test_gruppi_extra_dall_ambiente():
+    impostazioni = Impostazioni.da_env(
+        {
+            "TELEGRAM_CHAT_ID": str(PADRONE),
+            "TELEGRAM_CHAT_ID_COPPIA": str(COPPIA),
+            "TELEGRAM_CHAT_ID_GRUPPI": "-777, -888",
+        }
+    )
+    assert impostazioni.gruppi == (COPPIA, -777, -888)
+    assert impostazioni.chat_autorizzate == {PADRONE, COPPIA, -777, -888}
+    assert impostazioni.persone == (PADRONE,)  # i gruppi non ricevono il riepilogo meteo
+
+
+def test_il_gruppo_con_il_babbo_ha_la_sua_lista(impostazioni, messaggero, meteo, archivio):
+    bot = Azdora(
+        replace(impostazioni, chat_gruppi=(GRUPPO_BABBO,)),
+        messaggero,
+        meteo,
+        archivio=archivio,
+        orologio=lambda: ADESSO,
+    )
+    bot.gestisci_update(
+        messaggio("/aggiungi potare l'ulivo", chat_id=GRUPPO_BABBO, tipo="group", mittente=BABBO)
+    )
+    assert messaggero.inviati[-1][0] == GRUPPO_BABBO
+    assert "potare l&#x27;ulivo" in messaggero.ultimo
+    bot.gestisci_update(messaggio("/lista", chat_id=COPPIA, tipo="group", mittente=PADRONE))
+    assert "potare" not in messaggero.ultimo
+    assert messaggero.uscite == []
+
+
+def test_gruppo_non_in_lista_resta_fuori(bot, messaggero):
+    bot.gestisci_update(messaggio("/lista", chat_id=-999, tipo="group", mittente=BABBO))
+    assert messaggero.uscite == [-999]

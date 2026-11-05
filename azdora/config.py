@@ -103,6 +103,8 @@ class Impostazioni:
     chat_coppia: int | None = None
     # Chat private di familiari (babbo, fidanzata…): ognuno ha i suoi dati e il suo riepilogo.
     chat_famiglia: tuple[int, ...] = ()
+    # Altri gruppi (es. con il babbo): ognuno ha la sua lista, le sue spese e scadenze.
+    chat_gruppi: tuple[int, ...] = ()
     segreto_webhook: str = ""
     segreto_cron: str = ""
     username_bot: str = ""
@@ -119,6 +121,7 @@ class Impostazioni:
             chat_personale=_leggi_chat_id(env, "TELEGRAM_CHAT_ID"),
             chat_coppia=_leggi_chat_id(env, "TELEGRAM_CHAT_ID_COPPIA"),
             chat_famiglia=_leggi_lista_chat(env, "TELEGRAM_CHAT_ID_FAMIGLIA"),
+            chat_gruppi=_leggi_lista_chat(env, "TELEGRAM_CHAT_ID_GRUPPI"),
             segreto_webhook=env.get("TELEGRAM_WEBHOOK_SECRET", "").strip(),
             segreto_cron=env.get("CRON_SECRET", "").strip(),
             username_bot=env.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@"),
@@ -139,9 +142,15 @@ class Impostazioni:
         return tuple(dict.fromkeys(c for c in tutte if c is not None))
 
     @property
+    def gruppi(self) -> tuple[int, ...]:
+        """I gruppi autorizzati: quello di coppia e gli altri."""
+        tutti = (self.chat_coppia, *self.chat_gruppi)
+        return tuple(dict.fromkeys(c for c in tutti if c is not None))
+
+    @property
     def chat_autorizzate(self) -> frozenset[int]:
-        """Le uniche chat a cui il bot risponde: le chat private della famiglia e il gruppo."""
-        return frozenset((*self.persone, *((self.chat_coppia,) if self.chat_coppia else ())))
+        """Le uniche chat a cui il bot risponde: le chat private della famiglia e i gruppi."""
+        return frozenset((*self.persone, *self.gruppi))
 
     def richiedi_token(self) -> str:
         if not self.token:

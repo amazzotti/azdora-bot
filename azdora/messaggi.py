@@ -240,7 +240,8 @@ def messaggio_id(chat_id: int, autorizzata: bool) -> str:
             "Questa chat non è ancora autorizzata: manda questo numero a chi gestisce il bot.\n"
             "Per chi lo gestisce, su Vercel: <code>TELEGRAM_CHAT_ID</code> (la tua chat), "
             "<code>TELEGRAM_CHAT_ID_FAMIGLIA</code> (chat di un familiare, numeri separati da "
-            "virgola) o <code>TELEGRAM_CHAT_ID_COPPIA</code> (gruppo)."
+            "virgola), <code>TELEGRAM_CHAT_ID_COPPIA</code> (gruppo di coppia) o "
+            "<code>TELEGRAM_CHAT_ID_GRUPPI</code> (altri gruppi, separati da virgola)."
         )
     return "\n".join(righe)
 

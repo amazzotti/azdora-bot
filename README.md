@@ -118,7 +118,7 @@ flowchart LR
 - **Nessun segreto nel codice.** Token e chiavi vivono solo nelle variabili d'ambiente di Vercel e nei GitHub Secrets. Il file `.env` è escluso da git.
 - **Webhook protetto**: le richieste senza l'header `X-Telegram-Bot-Api-Secret-Token` giusto ricevono `401`. Il confronto è a tempo costante.
 - **Cron protetto**: serve `Authorization: Bearer <CRON_SECRET>`.
-- **Il bot risponde solo alle chat che autorizzi tu**: la tua chat privata, quelle dei familiari e il gruppo di coppia. Agli sconosciuti dice solo il loro `/id`. Solo tu puoi aggiungerlo a un gruppo: se lo fa un altro, il bot esce da solo.
+- **Il bot risponde solo alle chat che autorizzi tu**: la tua chat privata, quelle dei familiari, il gruppo di coppia e gli altri gruppi che indichi. Agli sconosciuti dice solo il loro `/id`. Solo tu puoi aggiungerlo a un gruppo: se lo fa un altro, il bot esce da solo.
 - **Ogni chat ha i suoi dati.** Scadenze, spese, lista e posizione di una persona non si mescolano con quelle delle altre. Il database Upstash però è tuo: avvisa i familiari che tecnicamente potresti vederli.
 - **Scadenze, spese e lista** stanno solo nel tuo database Upstash, mai nel repository.
 - **Posizione**: la salva solo se gliela mandi tu, nel tuo database Upstash, e la cancella da sola dopo 30 giorni (per notizie e allerte conta solo quella degli ultimi 3). Con `/dimentica` la cancelli subito. Le coordinate vanno a Open-Meteo e Nominatim solo per chiedere meteo e nome del luogo.
@@ -155,6 +155,7 @@ Lancialo due volte: un segreto serve per `TELEGRAM_WEBHOOK_SECRET`, l'altro per 
    | `UPSTASH_REDIS_REST_TOKEN` | dal punto 6 |
    | `TELEGRAM_CHAT_ID_FAMIGLIA` | facoltativa: id dei familiari separati da virgola (punto 7) |
    | `TELEGRAM_CHAT_ID_COPPIA` | facoltativa: id del gruppo di coppia (punto 8) |
+   | `TELEGRAM_CHAT_ID_GRUPPI` | facoltativa: id di altri gruppi, es. con il babbo, separati da virgola (punto 8) |
 
 4. Clicca **Deploy**. Per controllare, apri `https://<progetto>.vercel.app/api/webhook`: deve rispondere `{"ok": true, ...}`.
 
@@ -199,6 +200,8 @@ Per dare il bot a tuo babbo, alla tua ragazza o a chi vuoi, ognuno nella sua cha
 2. Metti quel numero in `TELEGRAM_CHAT_ID_COPPIA` su Vercel e fai **Redeploy**.
 3. Su @BotFather manda `/setjoingroups`, scegli il bot e poi **Disable**: nessun altro potrà più aggiungerlo a un gruppo.
 4. Nel gruppo funzionano tutti i comandi: lista condivisa, spese di casa, scadenze comuni, weekend.
+
+Altri gruppi, ad esempio uno con tuo babbo, si aggiungono allo stesso modo. Il loro id (sempre negativo) va in `TELEGRAM_CHAT_ID_GRUPPI`, separati da virgola, poi si fa **Redeploy**. Ogni gruppo ha la sua lista, le sue spese e le sue scadenze. Fai `/setjoingroups → Disable` solo dopo aver aggiunto il bot a tutti i gruppi che ti servono: se poi ne serve un altro, rimetti **Enable**, aggiungilo e torna su **Disable**.
 
 ## 🛠️ Sviluppo in locale
 
