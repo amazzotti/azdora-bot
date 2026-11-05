@@ -1,7 +1,7 @@
-"""Luoghi: da nome a coordinate e da coordinate a nome, con servizi gratuiti e senza chiave.
+"""Luoghi: da nome a coordinate e da coordinate a luogo, con servizi gratuiti e senza chiave.
 
 - Ricerca per nome ("Cesenatico" → coordinate): API di geocoding di Open-Meteo.
-- Ricerca inversa (coordinate → "Misano Adriatico (RN)"): Nominatim di OpenStreetMap.
+- Ricerca inversa (coordinate → comune, provincia, regione): Nominatim di OpenStreetMap.
   Le regole d'uso chiedono un User-Agent riconoscibile, al massimo una richiesta al secondo
   e l'attribuzione "© OpenStreetMap": a un bot personale basta e avanza.
 """
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import httpx
@@ -29,6 +30,26 @@ CHIAVI_INDIRIZZO = ("city", "town", "village", "municipality", "suburb", "hamlet
 
 class ErroreLuoghi(ErroreMeteo):
     """Il servizio di geocoding non risponde."""
+
+
+@dataclass(frozen=True)
+class Luogo:
+    """Dove si trova un punto: comune, sigla della provincia, regione e paese."""
+
+    comune: str
+    provincia: str | None = None  # sigla, es. "RN"
+    regione: str | None = None  # es. "Emilia-Romagna"
+    paese: str | None = None  # codice ISO minuscolo, es. "it"
+    nome_paese: str | None = None
+
+    @property
+    def etichetta(self) -> str:
+        """Esempio: ``"Misano Adriatico (RN)"`` oppure ``"Nizza (Francia)"``."""
+        if self.provincia:
+            return f"{self.comune} ({self.provincia})"
+        if self.paese and self.paese != "it" and self.nome_paese:
+            return f"{self.comune} ({self.nome_paese})"
+        return self.comune
 
 
 def distanza_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -66,25 +87,27 @@ def leggi_ricerca(dati: dict[str, Any]) -> Localita | None:
     )
 
 
-def leggi_nome_inverso(dati: dict[str, Any]) -> str | None:
-    """Nome del comune (con la sigla della provincia, se italiana) da una risposta Nominatim."""
+def leggi_luogo_inverso(dati: dict[str, Any]) -> Luogo | None:
+    """Comune, provincia, regione e paese da una risposta di Nominatim."""
     indirizzo = dati.get("address") or {}
-    nome = next((indirizzo[k] for k in CHIAVI_INDIRIZZO if indirizzo.get(k)), None)
-    if nome is None:
-        return dati.get("name") or None
+    comune = next((indirizzo[k] for k in CHIAVI_INDIRIZZO if indirizzo.get(k)), None)
+    comune = comune or dati.get("name")
+    if not comune:
+        return None
     provincia = indirizzo.get("ISO3166-2-lvl6", "")
-    if provincia.startswith("IT-"):
-        return f"{nome} ({provincia.removeprefix('IT-')})"
-    paese = indirizzo.get("country_code")
-    if paese and paese != "it" and indirizzo.get("country"):
-        return f"{nome} ({indirizzo['country']})"
-    return nome
+    return Luogo(
+        comune=comune,
+        provincia=provincia.removeprefix("IT-") if provincia.startswith("IT-") else None,
+        regione=indirizzo.get("state"),
+        paese=indirizzo.get("country_code"),
+        nome_paese=indirizzo.get("country"),
+    )
 
 
 class CercaLuoghi(Protocol):
     def cerca(self, nome: str) -> Localita | None: ...
 
-    def nome_di(self, lat: float, lon: float) -> str | None: ...
+    def luogo_di(self, lat: float, lon: float) -> Luogo | None: ...
 
 
 class Luoghi:
@@ -104,7 +127,7 @@ class Luoghi:
         except (httpx.HTTPError, ValueError, KeyError) as errore:
             raise ErroreLuoghi(f"Ricerca di {nome!r} non riuscita: {errore}") from errore
 
-    def nome_di(self, lat: float, lon: float) -> str | None:
+    def luogo_di(self, lat: float, lon: float) -> Luogo | None:
         """Il nome non è indispensabile: se Nominatim non risponde si restituisce ``None``."""
         try:
             risposta = self._http.get(
@@ -118,7 +141,7 @@ class Luoghi:
                 },
             )
             risposta.raise_for_status()
-            return leggi_nome_inverso(risposta.json())
+            return leggi_luogo_inverso(risposta.json())
         except (httpx.HTTPError, ValueError) as errore:
             log.warning("Nominatim non disponibile: %s", errore)
             return None

@@ -1,0 +1,509 @@
+{
+ "warnings": [
+  {
+   "alert": {
+    "identifier": "2.49.0.0.380.3.IT.261031105004.004",
+    "incidents": "Update",
+    "info": [
+     {
+      "area": [
+       {
+        "areaDesc": "Emilia e Romagna",
+        "geocode": [
+         {
+          "value": "IT008",
+          "valueName": "EMMA_ID"
+         }
+        ]
+       }
+      ],
+      "audience": "Private",
+      "category": [
+       "Met"
+      ],
+      "certainty": "Likely",
+      "description": "No Special Awareness Required\n (DISCLAIMER: \"Information provided on METEOALARM for Italy regard only the intensity and recurrence of the phenomena, further details can be found at www.meteoam.it. METEOALARM information do not provide the assessment of impact on the territory and they do not represent the Official Alerts messages that are issued by the National Civil Protection Service https://www.protezionecivile.gov.it\")",
+      "effective": "2026-10-31T10:50:00+01:00",
+      "event": "Green Wind Warning",
+      "expires": "2026-11-02T23:59:00+01:00",
+      "headline": "Green Wind Warning for Italy - Emilia e Romagna",
+      "instruction": "The weather is not expected to cause significant impacts but there may be some minor, localized issues",
+      "language": "en-GB",
+      "onset": "2026-10-31T10:50:00+01:00",
+      "parameter": [
+       {
+        "value": "1; green; Minor",
+        "valueName": "awareness_level"
+       },
+       {
+        "value": "1; Wind",
+        "valueName": "awareness_type"
+       }
+      ],
+      "responseType": [
+       "None"
+      ],
+      "senderName": "Italian Air Force National Meteorological Service",
+      "severity": "Minor",
+      "urgency": "Future",
+      "web": "https://meteoalarm.org/en/live/region/IT?s=emilia"
+     },
+     {
+      "area": [
+       {
+        "areaDesc": "Emilia e Romagna",
+        "geocode": [
+         {
+          "value": "IT008",
+          "valueName": "EMMA_ID"
+         }
+        ]
+       }
+      ],
+      "audience": "Privato",
+      "category": [
+       "Met"
+      ],
+      "certainty": "Likely",
+      "description": "Nessun Avviso\n (DISCLAIMER: \"Le informazioni fornite su METEOALARM per l'Italia riguardano esclusivamente l'intensità e la ricorrenza dei fenomeni, maggiori dettagli sono disponibili su www.meteoam.it. Le informazioni METEOALARM non forniscono la valutazione di impatto sul territorio e non rappresentano i messaggi di Allerta Ufficiali che vengono emessi dal Servizio Nazionale di Protezione Civile https://www.protezionecivile.gov.it\")",
+      "effective": "2026-10-31T10:50:00+01:00",
+      "event": "Verde Vento Allerta",
+      "expires": "2026-11-02T23:59:00+01:00",
+      "headline": "Allerta Vento Verde per l'Italia - Emilia e Romagna",
+      "instruction": "Non ci si aspetta che il tempo possa causare impatti significativi, ma potrebbero verificarsi alcuni locali, minori problemi.",
+      "language": "it-IT",
+      "onset": "2026-10-31T10:50:00+01:00",
+      "parameter": [
+       {
+        "value": "1; green; Minor",
+        "valueName": "awareness_level"
+       },
+       {
+        "value": "1; Wind",
+        "valueName": "awareness_type"
+       }
+      ],
+      "responseType": [
+       "None"
+      ],
+      "senderName": "Servizio Meteorologico dell'Aeronautica Militare",
+      "severity": "Minor",
+      "urgency": "Future",
+      "web": "https://meteoalarm.org/it/live/region/IT?s=emilia"
+     }
+    ],
+    "msgType": "Update",
+    "references": "aerocnmca.1sv.prv1@aeronautica.difesa.it,2.49.0.0.380.3.IT.261030105458.022,2026-10-30T10:54:58+01:00",
+    "scope": "Public",
+    "sender": "aerocnmca.1sv.prv1@aeronautica.difesa.it",
+    "sent": "2026-10-31T10:50:04+01:00",
+    "status": "Actual"
+   },
+   "uuid": "d76a89a1-3ce1-4880-a0da-b34bb0ccfddb"
+  },
+  {
+   "alert": {
+    "identifier": "2.49.0.0.380.3.IT.261101112749.003",
+    "incidents": "Update",
+    "info": [
+     {
+      "area": [
+       {
+        "areaDesc": "Emilia e Romagna",
+        "geocode": [
+         {
+          "value": "IT008",
+          "valueName": "EMMA_ID"
+         }
+        ]
+       }
+      ],
+      "audience": "Private",
+      "category": [
+       "Met"
+      ],
+      "certainty": "Likely",
+      "description": "No Special Awareness Required\n (DISCLAIMER: \"Information provided on METEOALARM for Italy regard only the intensity and recurrence of the phenomena, further details can be found at www.meteoam.it. METEOALARM information do not provide the assessment of impact on the territory and they do not represent the Official Alerts messages that are issued by the National Civil Protection Service https://www.protezionecivile.gov.it\")",
+      "effective": "2026-11-01T11:27:00+01:00",
+      "event": "Green Wind Warning",
+      "expires": "2026-11-03T23:59:00+01:00",
+      "headline": "Green Wind Warning for Italy - Emilia e Romagna",
+      "instruction": "The weather is not expected to cause significant impacts but there may be some minor, localized issues",
+      "language": "en-GB",
+      "onset": "2026-11-01T11:27:00+01:00",
+      "parameter": [
+       {
+        "value": "1; green; Minor",
+        "valueName": "awareness_level"
+       },
+       {
+        "value": "1; Wind",
+        "valueName": "awareness_type"
+       }
+      ],
+      "responseType": [
+       "None"
+      ],
+      "senderName": "Italian Air Force National Meteorological Service",
+      "severity": "Minor",
+      "urgency": "Future",
+      "web": "https://meteoalarm.org/en/live/region/IT?s=emilia"
+     },
+     {
+      "area": [
+       {
+        "areaDesc": "Emilia e Romagna",
+        "geocode": [
+         {
+          "value": "IT008",
+          "valueName": "EMMA_ID"
+         }
+        ]
+       }
+      ],
+      "audience": "Privato",
+      "category": [
+       "Met"
+      ],
+      "certainty": "Likely",
+      "description": "Nessun Avviso\n (DISCLAIMER: \"Le informazioni fornite su METEOALARM per l'Italia riguardano esclusivamente l'intensità e la ricorrenza dei fenomeni, maggiori dettagli sono disponibili su www.meteoam.it. Le informazioni METEOALARM non forniscono la valutazione di impatto sul territorio e non rappresentano i messaggi di Allerta Ufficiali che vengono emessi dal Servizio Nazionale di Protezione Civile https://www.protezionecivile.gov.it\")",
+      "effective": "2026-11-01T11:27:00+01:00",
+      "event": "Verde Vento Allerta",
+      "expires": "2026-11-03T23:59:00+01:00",
+      "headline": "Allerta Vento Verde per l'Italia - Emilia e Romagna",
+      "instruction": "Non ci si aspetta che il tempo possa causare impatti significativi, ma potrebbero verificarsi alcuni locali, minori problemi.",
+      "language": "it-IT",
+      "onset": "2026-11-01T11:27:00+01:00",
+      "parameter": [
+       {
+        "value": "1; green; Minor",
+        "valueName": "awareness_level"
+       },
+       {
+        "value": "1; Wind",
+        "valueName": "awareness_type"
+       }
+      ],
+      "responseType": [
+       "None"
+      ],
+      "senderName": "Servizio Meteorologico dell'Aeronautica Militare",
+      "severity": "Minor",
+      "urgency": "Future",
+      "web": "https://meteoalarm.org/it/live/region/IT?s=emilia"
+     }
+    ],
+    "msgType": "Update",
+    "references": "aerocnmca.1sv.prv1@aeronautica.difesa.it,2.49.0.0.380.3.IT.261031105004.037,2026-10-31T10:50:04+01:00",
+    "scope": "Public",
+    "sender": "aerocnmca.1sv.prv1@aeronautica.difesa.it",
+    "sent": "2026-11-01T11:27:49+01:00",
+    "status": "Actual"
+   },
+   "uuid": "b75c8e70-4a79-4f28-8936-86781a5687ce"
+  },
+  {
+   "alert": {
+    "identifier": "2.49.0.0.380.3.IT.261101112749.044",
+    "incidents": "Update",
+    "info": [
+     {
+      "area": [
+       {
+        "areaDesc": "Emilia e Romagna",
+        "geocode": [
+         {
+          "value": "IT008",
+          "valueName": "EMMA_ID"
+         }
+        ]
+       }
+      ],
+      "audience": "Private",
+      "category": [
+       "Met"
+      ],
+      "certainty": "Likely",
+      "description": "No Special Awareness Required\n (DISCLAIMER: \"Information provided on METEOALARM for Italy regard only the intensity and recurrence of the phenomena, further details can be found at www.meteoam.it. METEOALARM information do not provide the assessment of impact on the territory and they do not represent the Official Alerts messages that are issued by the National Civil Protection Service https://www.protezionecivile.gov.it\")",
+      "effective": "2026-11-01T11:27:00+01:00",
+      "event": "Green Wind Warning",
+      "expires": "2026-11-03T23:59:00+01:00",
+      "headline": "Green Wind Warning for Italy - Emilia e Romagna",
+      "instruction": "The weather is not expected to cause significant impacts but there may be some minor, localized issues",
+      "language": "en-GB",
+      "onset": "2026-11-01T11:27:00+01:00",
+      "parameter": [
+       {
+        "value": "1; green; Minor",
+        "valueName": "awareness_level"
+       },
+       {
+        "value": "1; Wind",
+        "valueName": "awareness_type"
+       }
+      ],
+      "responseType": [
+       "None"
+      ],
+      "senderName": "Italian Air Force National Meteorological Service",
+      "severity": "Minor",
+      "urgency": "Future",
+      "web": "https://meteoalarm.org/en/live/region/IT?s=emilia"
+     },
+     {
+      "area": [
+       {
+        "areaDesc": "Emilia e Romagna",
+        "geocode": [
+         {
+          "value": "IT008",
+          "valueName": "EMMA_ID"
+         }
+        ]
+       }
+      ],
+      "audience": "Privato",
+      "category": [
+       "Met"
+      ],
+      "certainty": "Likely",
+      "description": "Nessun Avviso\n (DISCLAIMER: \"Le informazioni fornite su METEOALARM per l'Italia riguardano esclusivamente l'intensità e la ricorrenza dei fenomeni, maggiori dettagli sono disponibili su www.meteoam.it. Le informazioni METEOALARM non forniscono la valutazione di impatto sul territorio e non rappresentano i messaggi di Allerta Ufficiali che vengono emessi dal Servizio Nazionale di Protezione Civile https://www.protezionecivile.gov.it\")",
+      "effective": "2026-11-01T11:27:00+01:00",
+      "event": "Verde Vento Allerta",
+      "expires": "2026-11-03T23:59:00+01:00",
+      "headline": "Allerta Vento Verde per l'Italia - Emilia e Romagna",
+      "instruction": "Non ci si aspetta che il tempo possa causare impatti significativi, ma potrebbero verificarsi alcuni locali, minori problemi.",
+      "language": "it-IT",
+      "onset": "2026-11-01T11:27:00+01:00",
+      "parameter": [
+       {
+        "value": "1; green; Minor",
+        "valueName": "awareness_level"
+       },
+       {
+        "value": "1; Wind",
+        "valueName": "awareness_type"
+       }
+      ],
+      "responseType": [
+       "None"
+      ],
+      "senderName": "Servizio Meteorologico dell'Aeronautica Militare",
+      "severity": "Minor",
+      "urgency": "Future",
+      "web": "https://meteoalarm.org/it/live/region/IT?s=emilia"
+     }
+    ],
+    "msgType": "Update",
+    "references": "aerocnmca.1sv.prv1@aeronautica.difesa.it,2.49.0.0.380.3.IT.261030105458.022,2026-10-30T10:54:58+01:00",
+    "scope": "Public",
+    "sender": "aerocnmca.1sv.prv1@aeronautica.difesa.it",
+    "sent": "2026-11-01T11:27:49+01:00",
+    "status": "Actual"
+   },
+   "uuid": "a6072d41-6b7f-473f-a91a-9b8c57ebee6d"
+  },
+  {
+   "alert": {
+    "identifier": "2.49.0.0.380.3.IT.261031105004.001",
+    "incidents": "Update",
+    "info": [
+     {
+      "area": [
+       {
+        "areaDesc": "Lombardia",
+        "geocode": [
+         {
+          "value": "IT003",
+          "valueName": "EMMA_ID"
+         }
+        ]
+       }
+      ],
+      "audience": "Private",
+      "category": [
+       "Met"
+      ],
+      "certainty": "Likely",
+      "description": "No Special Awareness Required\n (DISCLAIMER: \"Information provided on METEOALARM for Italy regard only the intensity and recurrence of the phenomena, further details can be found at www.meteoam.it. METEOALARM information do not provide the assessment of impact on the territory and they do not represent the Official Alerts messages that are issued by the National Civil Protection Service https://www.protezionecivile.gov.it\")",
+      "effective": "2026-10-31T10:50:00+01:00",
+      "event": "Green Fog Warning",
+      "expires": "2026-11-02T23:59:00+01:00",
+      "headline": "Green Fog Warning for Italy - Lombardia",
+      "instruction": "The weather is not expected to cause significant impacts but there may be some minor, localized issues",
+      "language": "en-GB",
+      "onset": "2026-10-31T10:50:00+01:00",
+      "parameter": [
+       {
+        "value": "1; green; Minor",
+        "valueName": "awareness_level"
+       },
+       {
+        "value": "4; Fog",
+        "valueName": "awareness_type"
+       }
+      ],
+      "responseType": [
+       "None"
+      ],
+      "senderName": "Italian Air Force National Meteorological Service",
+      "severity": "Minor",
+      "urgency": "Future",
+      "web": "https://meteoalarm.org/en/live/region/IT?s=lombardia"
+     },
+     {
+      "area": [
+       {
+        "areaDesc": "Lombardia",
+        "geocode": [
+         {
+          "value": "IT003",
+          "valueName": "EMMA_ID"
+         }
+        ]
+       }
+      ],
+      "audience": "Privato",
+      "category": [
+       "Met"
+      ],
+      "certainty": "Likely",
+      "description": "Nessun Avviso\n (DISCLAIMER: \"Le informazioni fornite su METEOALARM per l'Italia riguardano esclusivamente l'intensità e la ricorrenza dei fenomeni, maggiori dettagli sono disponibili su www.meteoam.it. Le informazioni METEOALARM non forniscono la valutazione di impatto sul territorio e non rappresentano i messaggi di Allerta Ufficiali che vengono emessi dal Servizio Nazionale di Protezione Civile https://www.protezionecivile.gov.it\")",
+      "effective": "2026-10-31T10:50:00+01:00",
+      "event": "Verde Nebbia Allerta",
+      "expires": "2026-11-02T23:59:00+01:00",
+      "headline": "Allerta Nebbia Verde per l'Italia - Lombardia",
+      "instruction": "Non ci si aspetta che il tempo possa causare impatti significativi, ma potrebbero verificarsi alcuni locali, minori problemi.",
+      "language": "it-IT",
+      "onset": "2026-10-31T10:50:00+01:00",
+      "parameter": [
+       {
+        "value": "1; green; Minor",
+        "valueName": "awareness_level"
+       },
+       {
+        "value": "4; Fog",
+        "valueName": "awareness_type"
+       }
+      ],
+      "responseType": [
+       "None"
+      ],
+      "senderName": "Servizio Meteorologico dell'Aeronautica Militare",
+      "severity": "Minor",
+      "urgency": "Future",
+      "web": "https://meteoalarm.org/it/live/region/IT?s=lombardia"
+     }
+    ],
+    "msgType": "Update",
+    "references": "aerocnmca.1sv.prv1@aeronautica.difesa.it,2.49.0.0.380.3.IT.261030105458.019,2026-10-30T10:54:58+01:00",
+    "scope": "Public",
+    "sender": "aerocnmca.1sv.prv1@aeronautica.difesa.it",
+    "sent": "2026-10-31T10:50:04+01:00",
+    "status": "Actual"
+   },
+   "uuid": "98b1fcdf-26d0-4fd5-98ef-60002a97abb0"
+  },
+  {
+   "alert": {
+    "identifier": "2.49.0.0.380.3.IT.261031105004.002",
+    "incidents": "Update",
+    "info": [
+     {
+      "area": [
+       {
+        "areaDesc": "Friuli Venezia Giulia",
+        "geocode": [
+         {
+          "value": "IT020",
+          "valueName": "EMMA_ID"
+         }
+        ]
+       }
+      ],
+      "audience": "Private",
+      "category": [
+       "Met"
+      ],
+      "certainty": "Likely",
+      "description": "No Special Awareness Required\n (DISCLAIMER: \"Information provided on METEOALARM for Italy regard only the intensity and recurrence of the phenomena, further details can be found at www.meteoam.it. METEOALARM information do not provide the assessment of impact on the territory and they do not represent the Official Alerts messages that are issued by the National Civil Protection Service https://www.protezionecivile.gov.it\")",
+      "effective": "2026-10-31T10:50:00+01:00",
+      "event": "Green Wind Warning",
+      "expires": "2026-11-02T23:59:00+01:00",
+      "headline": "Green Wind Warning for Italy - Friuli Venezia Giulia",
+      "instruction": "The weather is not expected to cause significant impacts but there may be some minor, localized issues",
+      "language": "en-GB",
+      "onset": "2026-10-31T10:50:00+01:00",
+      "parameter": [
+       {
+        "value": "1; green; Minor",
+        "valueName": "awareness_level"
+       },
+       {
+        "value": "1; Wind",
+        "valueName": "awareness_type"
+       }
+      ],
+      "responseType": [
+       "None"
+      ],
+      "senderName": "Italian Air Force National Meteorological Service",
+      "severity": "Minor",
+      "urgency": "Future",
+      "web": "https://meteoalarm.org/en/live/region/IT?s=friuli"
+     },
+     {
+      "area": [
+       {
+        "areaDesc": "Friuli Venezia Giulia",
+        "geocode": [
+         {
+          "value": "IT020",
+          "valueName": "EMMA_ID"
+         }
+        ]
+       }
+      ],
+      "audience": "Privato",
+      "category": [
+       "Met"
+      ],
+      "certainty": "Likely",
+      "description": "Nessun Avviso\n (DISCLAIMER: \"Le informazioni fornite su METEOALARM per l'Italia riguardano esclusivamente l'intensità e la ricorrenza dei fenomeni, maggiori dettagli sono disponibili su www.meteoam.it. Le informazioni METEOALARM non forniscono la valutazione di impatto sul territorio e non rappresentano i messaggi di Allerta Ufficiali che vengono emessi dal Servizio Nazionale di Protezione Civile https://www.protezionecivile.gov.it\")",
+      "effective": "2026-10-31T10:50:00+01:00",
+      "event": "Verde Vento Allerta",
+      "expires": "2026-11-02T23:59:00+01:00",
+      "headline": "Allerta Vento Verde per l'Italia - Friuli Venezia Giulia",
+      "instruction": "Non ci si aspetta che il tempo possa causare impatti significativi, ma potrebbero verificarsi alcuni locali, minori problemi.",
+      "language": "it-IT",
+      "onset": "2026-10-31T10:50:00+01:00",
+      "parameter": [
+       {
+        "value": "1; green; Minor",
+        "valueName": "awareness_level"
+       },
+       {
+        "value": "1; Wind",
+        "valueName": "awareness_type"
+       }
+      ],
+      "responseType": [
+       "None"
+      ],
+      "senderName": "Servizio Meteorologico dell'Aeronautica Militare",
+      "severity": "Minor",
+      "urgency": "Future",
+      "web": "https://meteoalarm.org/it/live/region/IT?s=friuli"
+     }
+    ],
+    "msgType": "Update",
+    "references": "aerocnmca.1sv.prv1@aeronautica.difesa.it,2.49.0.0.380.3.IT.261030105458.020,2026-10-30T10:54:58+01:00",
+    "scope": "Public",
+    "sender": "aerocnmca.1sv.prv1@aeronautica.difesa.it",
+    "sent": "2026-10-31T10:50:04+01:00",
+    "status": "Actual"
+   },
+   "uuid": "958f44ae-1da9-4397-b036-7228079a1d70"
+  }
+ ]
+}

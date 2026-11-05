@@ -98,6 +98,9 @@ def test_lavoro_mattino_da_riga_di_comando(env_telegram, json_previsioni, json_m
     respx.get("https://marine-api.open-meteo.com/v1/marine").mock(
         return_value=httpx.Response(200, json=json_mare)
     )
+    respx.get(url__startswith="https://feeds.meteoalarm.org/").mock(
+        return_value=httpx.Response(200, json={"warnings": []})
+    )
     invio = respx.post(f"{BASE}/sendMessage").mock(
         return_value=httpx.Response(200, json={"ok": True, "result": {}})
     )

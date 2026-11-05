@@ -5,13 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "azdora-bot"
 version = "0.1.0"
-description = "Bot Telegram personale per Rimini e Riccione: meteo, vento, mare e riepilogo mattutino."
+description = "Bot Telegram personale per Rimini e Riccione: meteo, vento, mare, notizie e allerte."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "Alessandro Mazzotti" }]
 keywords = ["telegram", "bot", "meteo", "open-meteo", "rimini", "riccione"]
 dependencies = [
+    "defusedxml>=0.7",
     "httpx>=0.27,<1",
     "tzdata>=2024.1",
 ]

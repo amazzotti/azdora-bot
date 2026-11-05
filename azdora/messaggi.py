@@ -184,13 +184,17 @@ Tengo d'occhio il tempo tra Riccione e Rimini, e ovunque tu sia.
 /vento – vento adesso e nelle prossime ore
 /mare – onde e temperatura dell'acqua
 /qui – meteo dove ti trovi adesso 📍
+/notizie – ultime notizie della tua zona 🗞️
+/allerte – allerte meteo della tua zona ⚠️
+/dove – dove credo che tu sia
+/dimentica – cancello la posizione che ricordo
 /id – l'id di questa chat
 /aiuto – questo messaggio
 
-Puoi aggiungere qualsiasi località: <code>/vento rimini</code>, <code>/meteo cesenatico</code>.
-Senza località uso Riccione.
-Mandami la tua posizione (📎 → Posizione) e ti dico che tempo fa lì.
-Ogni mattina alle 7 ti mando il riepilogo. ☕"""
+Puoi aggiungere qualsiasi località: <code>/vento rimini</code>, <code>/notizie cesenatico</code>.
+Mandami la posizione (📎 → Posizione, anche in tempo reale): ti dico che tempo fa lì
+e per 3 giorni notizie e allerte seguono te. Altrimenti uso Riccione.
+Ogni mattina alle 7 ti mando il riepilogo ☕ e, quando serve, notizie e allerte nuove."""
 
 CREDITI_OSM = '<i>Luogo: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a></i>'
 
@@ -229,3 +233,50 @@ def messaggio_id(chat_id: int, autorizzata: bool) -> str:
 LOCALITA_SCONOSCIUTA = "🤔 Non trovo «{nome}». Prova a scrivere il nome del comune per intero."
 COMANDO_SCONOSCIUTO = "🤔 Non conosco questo comando. Scrivi /aiuto per vedere cosa so fare."
 METEO_NON_DISPONIBILE = "😓 Open-Meteo non risponde in questo momento. Riprova tra qualche minuto."
+
+
+# --- Tappa 2: posizione salvata, notizie e allerte ----------------------------------------
+
+POSIZIONE_RICORDATA = (
+    "📌 Mi ricordo che sei qui: notizie e allerte saranno su questa zona per 3 giorni. "
+    "/dimentica per cancellare la posizione."
+)
+POSIZIONE_LIVE = (
+    "📡 Posizione in tempo reale: aggiorno la tua zona mentre ti sposti, finché la condividi."
+)
+POSIZIONE_DIMENTICATA = "🧹 Fatto: ho dimenticato la tua posizione. Torno a guardare Riccione."
+NESSUNA_POSIZIONE = "🏠 Non so dove sei: uso Riccione. Mandami la posizione con /qui."
+ARCHIVIO_NON_DISPONIBILE = "😓 Non riesco a leggere la mia memoria (Upstash). Riprova tra poco."
+
+
+def messaggio_dove(etichetta: str, quando: datetime, in_tempo_reale: bool, valida: bool) -> str:
+    righe = [
+        f"📍 L'ultima posizione che mi hai mandato è <b>{escape(etichetta)}</b>",
+        f"({data_breve(quando.date())} alle {ora(quando)}"
+        + (", in tempo reale)" if in_tempo_reale else ")"),
+    ]
+    if not valida:
+        righe.append("È passato troppo tempo: per notizie e allerte uso Riccione.")
+    righe.append("/dimentica per cancellarla.")
+    return "\n".join(righe)
+
+
+def titolo_notizie(etichetta: str, nuove: bool) -> str:
+    if nuove:
+        return f"🗞️ <b>Novità da {escape(etichetta)}</b>"
+    return f"🗞️ <b>Ultime notizie da {escape(etichetta)}</b>"
+
+
+def nessuna_notizia(etichetta: str) -> str:
+    return f"🗞️ Nessuna notizia nelle ultime ore su {escape(etichetta)}."
+
+
+def titolo_allerte(regione: str) -> str:
+    return f"⚠️ <b>Allerte meteo · {escape(regione)}</b>"
+
+
+def nessuna_allerta(regione: str) -> str:
+    return f"🟢 Nessuna allerta meteo in {escape(regione)}."
+
+
+ALLERTE_NON_DISPONIBILI = "🤷 Per questa zona non ho dati sulle allerte meteo."

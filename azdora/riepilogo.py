@@ -144,6 +144,7 @@ def componi_riepilogo(
     titolo: str,
     con_attuale: bool,
     crediti: str = CREDITI,
+    avvisi: Sequence[str] = (),
 ) -> str:
     """Messaggio completo per una giornata. La prima località decide alba, tramonto e consigli."""
     righe = [titolo]
@@ -159,18 +160,23 @@ def componi_riepilogo(
         righe += ["", sole, "", "<b>Consigli</b>"]
         righe += consigli(giorno, principale.giorno_mare(data) if principale else None)
 
+    if avvisi:
+        # Allerte e altre informazioni importanti, prima dei crediti.
+        righe += ["", *avvisi]
     righe += ["", crediti]
     return "\n".join(righe)
 
 
-def riepilogo_oggi(localita: Sequence[DatiLocalita], adesso: datetime, nome: str) -> str:
+def riepilogo_oggi(
+    localita: Sequence[DatiLocalita], adesso: datetime, nome: str, avvisi: Sequence[str] = ()
+) -> str:
     oggi = adesso.date()
     titolo = (
         f"☀️ <b>{saluto(adesso)} {nome}!</b>\nOggi è {data_lunga(oggi)}."
         if nome
         else f"☀️ <b>Oggi, {data_lunga(oggi)}</b>"
     )
-    return componi_riepilogo(localita, oggi, titolo=titolo, con_attuale=True)
+    return componi_riepilogo(localita, oggi, titolo=titolo, con_attuale=True, avvisi=avvisi)
 
 
 def riepilogo_domani(localita: Sequence[DatiLocalita], domani: date) -> str:

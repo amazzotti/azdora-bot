@@ -93,6 +93,9 @@ class Impostazioni:
     segreto_cron: str = ""
     username_bot: str = ""
     nome_utente: str = "Ale"
+    # Upstash Redis: la memoria del bot (posizione, notizie già mandate, ...).
+    archivio_url: str = ""
+    archivio_token: str = ""
 
     @classmethod
     def da_env(cls, env: Mapping[str, str] | None = None) -> Impostazioni:
@@ -105,6 +108,13 @@ class Impostazioni:
             segreto_cron=env.get("CRON_SECRET", "").strip(),
             username_bot=env.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@"),
             nome_utente=env.get("AZDORA_NOME", "").strip() or "Ale",
+            # Accetta sia i nomi di Upstash sia quelli creati dall'integrazione di Vercel.
+            archivio_url=(
+                env.get("UPSTASH_REDIS_REST_URL") or env.get("KV_REST_API_URL") or ""
+            ).strip(),
+            archivio_token=(
+                env.get("UPSTASH_REDIS_REST_TOKEN") or env.get("KV_REST_API_TOKEN") or ""
+            ).strip(),
         )
 
     @property

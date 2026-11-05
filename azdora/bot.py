@@ -1,8 +1,8 @@
 """Il cervello del bot: riceve un update di Telegram e decide cosa rispondere.
 
 Non sa nulla di HTTP né di Vercel: riceve dall'esterno il messaggero (chi spedisce i
-messaggi), la fonte meteo e il servizio dei luoghi. Così nei test si sostituiscono con
-dei finti e nel simulatore con la console.
+messaggi), la fonte meteo, i luoghi, l'archivio, le notizie e le allerte. Così nei test
+si sostituiscono con dei finti e nel simulatore con la console.
 """
 
 from __future__ import annotations
@@ -14,10 +14,22 @@ from datetime import datetime, timedelta
 from html import escape
 from typing import Any
 
+from azdora import allerte as modulo_allerte
 from azdora import messaggi
+from azdora import notizie as modulo_notizie
+from azdora.allerte import FonteAllerte
+from azdora.archivio import Archivio, ArchivioMemoria, ErroreArchivio
 from azdora.config import FUSO_ORARIO, LOCALITA, Impostazioni, Localita, trova_localita
-from azdora.luoghi import CercaLuoghi, distanza_km, localita_qui
+from azdora.luoghi import CercaLuoghi, Luogo, distanza_km, localita_qui
 from azdora.meteo.openmeteo import ErroreMeteo, FonteMeteo, PrevisioniMare
+from azdora.notizie import FonteNotizie, Notizia
+from azdora.posizione import (
+    SPOSTAMENTO_MINIMO_KM,
+    VALIDITA_ZONA,
+    MemoriaPosizione,
+    Posizione,
+    Zona,
+)
 from azdora.riepilogo import (
     DatiLocalita,
     riepilogo_domani,
@@ -36,6 +48,10 @@ COMANDI: tuple[tuple[str, str], ...] = (
     ("vento", "Vento adesso e nelle prossime ore"),
     ("mare", "Onde e temperatura dell'acqua"),
     ("qui", "Meteo dove ti trovi adesso"),
+    ("notizie", "Ultime notizie della tua zona"),
+    ("allerte", "Allerte meteo della tua zona"),
+    ("dove", "Dove credo che tu sia"),
+    ("dimentica", "Cancella la posizione che ricordo"),
     ("id", "Mostra l'id di questa chat"),
     ("aiuto", "Cosa so fare"),
 )
@@ -44,6 +60,14 @@ TIPI_GRUPPO = frozenset({"group", "supergroup"})
 
 # Oltre questa distanza il punto marino di Open-Meteo non descrive più "il mare lì davanti".
 DISTANZA_MASSIMA_MARE_KM = 30
+# Se sei più lontano di così da Riccione e Rimini, il riepilogo aggiunge il meteo di dove sei.
+DISTANZA_DA_CASA_KM = 15
+
+# Notizie: quante al massimo per messaggio e per quanto ricordarle come già mandate.
+MASSIMO_NOTIZIE = 5
+MASSIMO_NOTIZIE_ZONA_NUOVA = 3
+RICORDO_NOTIZIE_S = 3 * 24 * 3600
+RICORDO_ZONA_S = 30 * 24 * 3600
 
 
 @dataclass(frozen=True)
@@ -89,12 +113,20 @@ class Azdora:
         messaggero: Messaggero,
         meteo: FonteMeteo,
         luoghi: CercaLuoghi | None = None,
+        *,
+        archivio: Archivio | None = None,
+        notizie: FonteNotizie | None = None,
+        allerte: FonteAllerte | None = None,
         orologio: Callable[[], datetime] = adesso_a_roma,
     ) -> None:
         self.impostazioni = impostazioni
         self.messaggero = messaggero
         self.meteo = meteo
         self.luoghi = luoghi
+        self.archivio: Archivio = archivio if archivio is not None else ArchivioMemoria()
+        self.posizioni = MemoriaPosizione(self.archivio)
+        self.notizie = notizie
+        self.allerte = allerte
         self.orologio = orologio
         self._azioni: dict[str, Callable[[Chat, Comando], None]] = {
             "start": self._aiuto,
@@ -106,21 +138,24 @@ class Azdora:
             "vento": self._vento,
             "mare": self._mare,
             "qui": self._qui,
+            "notizie": self._notizie,
+            "allerte": self._allerte,
+            "dove": self._dove,
+            "dimentica": self._dimentica,
             "id": self._id,
         }
 
     # --- Ingresso ---------------------------------------------------------------------
 
     def gestisci_update(self, update: dict[str, Any]) -> None:
-        """Punto di ingresso per ogni update arrivato dal webhook.
-
-        Gli aggiornamenti della posizione in tempo reale arrivano come ``edited_message``
-        e per ora vengono ignorati: si risponde solo alla posizione iniziale.
-        """
+        """Punto di ingresso per ogni update arrivato dal webhook."""
         if "my_chat_member" in update:
             self._aggiunto_a_chat(update["my_chat_member"])
         elif "message" in update:
             self._messaggio(update["message"])
+        elif "edited_message" in update:
+            # La posizione in tempo reale arriva come messaggio modificato, più volte.
+            self._posizione_aggiornata(update["edited_message"])
 
     def _e_autorizzata(self, chat_id: int) -> bool:
         return chat_id in self.impostazioni.chat_autorizzate
@@ -173,6 +208,9 @@ class Azdora:
         except ErroreMeteo as errore:
             log.warning("Meteo non disponibile: %s", errore)
             self.messaggero.invia_messaggio(chat.id, messaggi.METEO_NON_DISPONIBILE)
+        except ErroreArchivio as errore:
+            log.warning("Archivio non disponibile: %s", errore)
+            self.messaggero.invia_messaggio(chat.id, messaggi.ARCHIVIO_NON_DISPONIBILE)
 
     def _non_per_me(self, comando: Comando) -> bool:
         """Nei gruppi ``/meteo@altro_bot`` è rivolto a un altro bot."""
@@ -221,6 +259,70 @@ class Azdora:
                 return None
         return mare
 
+    # --- Posizione --------------------------------------------------------------------
+
+    def _luogo(self, lat: float, lon: float) -> Luogo | None:
+        return self.luoghi.luogo_di(lat, lon) if self.luoghi is not None else None
+
+    def _posizione(self, chat: Chat, posizione: dict[str, Any]) -> None:
+        """Hai mandato la posizione: meteo per quel punto, e la ricordo per notizie e allerte."""
+        lat, lon = float(posizione["latitude"]), float(posizione["longitude"])
+        luogo = self._luogo(lat, lon)
+        etichetta = luogo.etichetta if luogo else messaggi.NOME_POSIZIONE_SCONOSCIUTO
+        localita = localita_qui(lat, lon, etichetta)
+        dati = DatiLocalita(self.meteo.previsioni(localita), self._mare_vicino(localita))
+        testo = riepilogo_posizione(dati, self.orologio(), nome_da_osm=luogo is not None)
+
+        in_tempo_reale = "live_period" in posizione
+        self.posizioni.salva(chat.id, self._nuova_posizione(lat, lon, luogo, in_tempo_reale))
+        nota = messaggi.POSIZIONE_LIVE if in_tempo_reale else messaggi.POSIZIONE_RICORDATA
+        testo = f"{testo}\n\n{nota}"
+
+        # Nelle chat private toglie il pulsante "Manda la mia posizione" dopo l'uso.
+        tastiera = None if chat.e_un_gruppo else messaggi.TOGLI_TASTIERA
+        self.messaggero.invia_messaggio(chat.id, testo, tastiera)
+
+    def _nuova_posizione(
+        self, lat: float, lon: float, luogo: Luogo | None, in_tempo_reale: bool
+    ) -> Posizione:
+        return Posizione(
+            lat=lat,
+            lon=lon,
+            quando=self.orologio(),
+            comune=luogo.comune if luogo else None,
+            provincia=luogo.provincia if luogo else None,
+            regione=luogo.regione if luogo else None,
+            paese=luogo.paese if luogo else None,
+            in_tempo_reale=in_tempo_reale,
+        )
+
+    def _posizione_aggiornata(self, messaggio: dict[str, Any]) -> None:
+        """Aggiornamento della posizione in tempo reale: si salva in silenzio, senza rispondere."""
+        chat_id = messaggio.get("chat", {}).get("id")
+        posizione = messaggio.get("location")
+        if chat_id is None or posizione is None or not self._e_autorizzata(chat_id):
+            return
+        lat, lon = float(posizione["latitude"]), float(posizione["longitude"])
+        try:
+            precedente = self.posizioni.leggi(chat_id)
+            spostato = precedente is None or (
+                distanza_km(precedente.lat, precedente.lon, lat, lon) >= SPOSTAMENTO_MINIMO_KM
+            )
+            if spostato or not precedente.comune:
+                luogo = self._luogo(lat, lon)
+            else:
+                # Ancora nello stesso posto: niente richiesta a Nominatim, si tiene il nome.
+                luogo = Luogo(
+                    precedente.comune, precedente.provincia, precedente.regione, precedente.paese
+                )
+            self.posizioni.salva(chat_id, self._nuova_posizione(lat, lon, luogo, True))
+        except ErroreArchivio as errore:
+            log.warning("Posizione in tempo reale non salvata: %s", errore)
+
+    def zona(self) -> Zona:
+        """La zona attuale del padrone: dove si trova, o casa."""
+        return self.posizioni.zona(self.impostazioni.chat_personale, self.orologio())
+
     # --- Comandi ----------------------------------------------------------------------
 
     def _aiuto(self, chat: Chat, comando: Comando) -> None:
@@ -258,16 +360,65 @@ class Azdora:
                 chat.id, messaggi.QUI_PRIVATA, messaggi.TASTIERA_POSIZIONE
             )
 
-    def _posizione(self, chat: Chat, posizione: dict[str, Any]) -> None:
-        """Hai mandato la posizione: meteo, vento, mare (se vicino) e consigli per quel punto."""
-        lat, lon = float(posizione["latitude"]), float(posizione["longitude"])
-        nome = self.luoghi.nome_di(lat, lon) if self.luoghi is not None else None
-        localita = localita_qui(lat, lon, nome or messaggi.NOME_POSIZIONE_SCONOSCIUTO)
-        dati = DatiLocalita(self.meteo.previsioni(localita), self._mare_vicino(localita))
-        testo = riepilogo_posizione(dati, self.orologio(), nome_da_osm=nome is not None)
-        # Nelle chat private toglie il pulsante "Manda la mia posizione" dopo l'uso.
-        tastiera = None if chat.e_un_gruppo else messaggi.TOGLI_TASTIERA
-        self.messaggero.invia_messaggio(chat.id, testo, tastiera)
+    def _dove(self, chat: Chat, comando: Comando) -> None:
+        posizione = self.posizioni.leggi(chat.id)
+        if posizione is None:
+            self.messaggero.invia_messaggio(chat.id, messaggi.NESSUNA_POSIZIONE)
+            return
+        valida = self.orologio() - posizione.quando <= VALIDITA_ZONA
+        self.messaggero.invia_messaggio(
+            chat.id,
+            messaggi.messaggio_dove(
+                posizione.etichetta, posizione.quando, posizione.in_tempo_reale, valida
+            ),
+        )
+
+    def _dimentica(self, chat: Chat, comando: Comando) -> None:
+        self.posizioni.dimentica(chat.id)
+        self.messaggero.invia_messaggio(chat.id, messaggi.POSIZIONE_DIMENTICATA)
+
+    def _zona_richiesta(self, chat: Chat, comando: Comando) -> tuple[str, float, float] | None:
+        """Comune su cui cercare notizie: quello scritto, o la zona attuale."""
+        if comando.argomenti:
+            localita = self._localita_richiesta(chat, comando)
+            if localita is None:
+                return None
+            return localita.nome.split(" (")[0], localita.lat, localita.lon
+        zona = self.posizioni.zona(chat.id, self.orologio())
+        if not zona.da_posizione and chat.id != self.impostazioni.chat_personale:
+            zona = self.zona()
+        return zona.comune, zona.lat, zona.lon
+
+    def _notizie(self, chat: Chat, comando: Comando) -> None:
+        if self.notizie is None:
+            self.messaggero.invia_messaggio(chat.id, messaggi.nessuna_notizia("questa zona"))
+            return
+        zona = self._zona_richiesta(chat, comando)
+        if zona is None:
+            return
+        comune, lat, lon = zona
+        trovate = self.notizie.notizie_per(comune, lat, lon, self.orologio())
+        if not trovate:
+            self.messaggero.invia_messaggio(chat.id, messaggi.nessuna_notizia(comune))
+            return
+        testo = modulo_notizie.formatta(
+            trovate[:MASSIMO_NOTIZIE], messaggi.titolo_notizie(comune, nuove=False)
+        )
+        self.messaggero.invia_messaggio(chat.id, testo)
+
+    def _allerte(self, chat: Chat, comando: Comando) -> None:
+        zona = self.zona()
+        self.messaggero.invia_messaggio(chat.id, self._testo_allerte(zona, solo_se_ci_sono=False))
+
+    def _testo_allerte(self, zona: Zona, solo_se_ci_sono: bool) -> str:
+        if self.allerte is None or not zona.regione or not zona.paese:
+            return "" if solo_se_ci_sono else messaggi.ALLERTE_NON_DISPONIBILI
+        attive = modulo_allerte.per_regione(
+            self.allerte.allerte(zona.paese), zona.regione, self.orologio()
+        )
+        if not attive:
+            return "" if solo_se_ci_sono else messaggi.nessuna_allerta(zona.regione)
+        return modulo_allerte.formatta(attive, zona.regione, messaggi.titolo_allerte(zona.regione))
 
     def _oggi(self, chat: Chat, comando: Comando) -> None:
         self.messaggero.invia_messaggio(chat.id, self.testo_oggi(saluta=False))
@@ -278,24 +429,124 @@ class Azdora:
 
     # --- Riepiloghi -------------------------------------------------------------------
 
-    def _dati_localita(self) -> list[DatiLocalita]:
+    def _dati_localita(self, zona: Zona | None = None) -> list[DatiLocalita]:
+        """Riccione e Rimini; se sei lontano da casa, prima il posto dove sei."""
+        luoghi = list(LOCALITA)
+        if zona is not None and zona.da_posizione and self._lontano_da_casa(zona):
+            luoghi.insert(0, localita_qui(zona.lat, zona.lon, zona.etichetta))
         return [
             DatiLocalita(self.meteo.previsioni(localita), self._mare_vicino(localita))
-            for localita in LOCALITA
+            for localita in luoghi
         ]
+
+    @staticmethod
+    def _lontano_da_casa(zona: Zona) -> bool:
+        return all(
+            distanza_km(zona.lat, zona.lon, casa.lat, casa.lon) > DISTANZA_DA_CASA_KM
+            for casa in LOCALITA
+        )
 
     def testo_oggi(self, saluta: bool) -> str:
         nome = self.impostazioni.nome_utente if saluta else ""
-        return riepilogo_oggi(self._dati_localita(), self.orologio(), nome)
+        zona = self._zona_sicura()
+        avvisi = []
+        if zona is not None and (testo := self._testo_allerte(zona, solo_se_ci_sono=True)):
+            avvisi.append(testo)
+        return riepilogo_oggi(self._dati_localita(zona), self.orologio(), nome, avvisi)
+
+    def _zona_sicura(self) -> Zona | None:
+        """La zona, ma senza far fallire il riepilogo se l'archivio non risponde."""
+        try:
+            return self.zona()
+        except ErroreArchivio as errore:
+            log.warning("Zona non disponibile: %s", errore)
+            return None
 
     def invia_riepilogo_mattutino(self) -> None:
         """Il messaggio delle 7, spedito alla chat personale."""
-        chat_id = self.impostazioni.chat_personale
-        if chat_id is None:
-            raise RuntimeError("Manca TELEGRAM_CHAT_ID: non so a chi mandare il riepilogo")
+        chat_id = self._chat_personale()
         try:
             testo = self.testo_oggi(saluta=True)
         except ErroreMeteo as errore:
             log.error("Riepilogo mattutino senza meteo: %s", errore)
             testo = messaggi.METEO_NON_DISPONIBILE
         self.messaggero.invia_messaggio(chat_id, testo)
+
+    def _chat_personale(self) -> int:
+        chat_id = self.impostazioni.chat_personale
+        if chat_id is None:
+            raise RuntimeError("Manca TELEGRAM_CHAT_ID: non so a chi scrivere")
+        return chat_id
+
+    # --- Controlli automatici (ogni 15 minuti da cron-job.org) --------------------------
+
+    def _serve_memoria(self, lavoro: str) -> bool:
+        if not self.archivio.persistente:
+            # Senza memoria ogni controllo rimanderebbe tutto da capo: meglio non mandare nulla.
+            log.warning(
+                "%s: serve l'archivio Upstash per ricordare cosa è già stato mandato", lavoro
+            )
+            return False
+        return True
+
+    def controlla_notizie(self) -> int:
+        """Manda le notizie nuove della zona. Restituisce quante ne ha mandate."""
+        chat_id = self._chat_personale()
+        if self.notizie is None or not self._serve_memoria("Notizie"):
+            return 0
+        zona = self.zona()
+        trovate = self.notizie.notizie_per(zona.comune, zona.lat, zona.lon, self.orologio())
+        # La prima volta in una zona non si manda tutto l'arretrato: solo le ultime.
+        (zona_nuova,) = self.archivio.segna_nuovi(
+            [f"zona-notizie:{zona.comune.lower()}"], RICORDO_ZONA_S
+        )
+        if not trovate:
+            return 0
+        nuove = [
+            n
+            for n, nuova in zip(
+                trovate,
+                self.archivio.segna_nuovi(
+                    [f"notizia:{n.impronta}" for n in trovate], RICORDO_NOTIZIE_S
+                ),
+                strict=True,
+            )
+            if nuova
+        ]
+        massimo = MASSIMO_NOTIZIE_ZONA_NUOVA if zona_nuova else MASSIMO_NOTIZIE
+        da_mandare: list[Notizia] = nuove[:massimo]
+        if da_mandare:
+            titolo = messaggi.titolo_notizie(zona.etichetta, nuove=True)
+            self.messaggero.invia_messaggio(chat_id, modulo_notizie.formatta(da_mandare, titolo))
+        return len(da_mandare)
+
+    def controlla_allerte(self) -> int:
+        """Manda le allerte nuove (o salite di livello) della zona."""
+        chat_id = self._chat_personale()
+        if self.allerte is None or not self._serve_memoria("Allerte"):
+            return 0
+        zona = self.zona()
+        if not zona.regione or not zona.paese:
+            return 0
+        adesso = self.orologio()
+        attive = modulo_allerte.per_regione(self.allerte.allerte(zona.paese), zona.regione, adesso)
+        nuove = []
+        for allerta in attive:
+            durata = (allerta.fine - adesso).total_seconds() if allerta.fine else 3 * 24 * 3600
+            (nuova,) = self.archivio.segna_nuovi([allerta.chiave], max(int(durata), 3600))
+            if nuova:
+                nuove.append(allerta)
+        if nuove:
+            titolo = messaggi.titolo_allerte(zona.regione)
+            self.messaggero.invia_messaggio(
+                chat_id, modulo_allerte.formatta(nuove, zona.regione, titolo)
+            )
+        return len(nuove)
+
+    def controlli(self) -> None:
+        """Il giro di controlli periodico: allerte prima, poi notizie."""
+        for controllo in (self.controlla_allerte, self.controlla_notizie):
+            try:
+                controllo()
+            except (ErroreArchivio, ErroreMeteo) as errore:
+                log.warning("Controllo %s saltato: %s", controllo.__name__, errore)

@@ -8,6 +8,8 @@ Esempi::
     python -m azdora.simula /oggi
     python -m azdora.simula "/vento rimini" "/meteo cesenatico" /mare
     python -m azdora.simula posizione:43.978,12.697   # come se mandassi la posizione
+    python -m azdora.simula /notizie /allerte         # notizie e allerte della zona
+    python -m azdora.simula posizione:44.49,11.34 controlli   # i controlli ogni 15 minuti
     python -m azdora.simula mattino                   # il messaggio delle 7
     python -m azdora.simula --offline /domani         # senza internet
 """
@@ -23,10 +25,12 @@ from html import unescape
 from pathlib import Path
 from typing import Any
 
+from azdora.allerte import Allerta, Meteoalarm, leggi_allerte
 from azdora.app import nuovo_client_http
+from azdora.archivio import ArchivioMemoria
 from azdora.bot import Azdora
 from azdora.config import FUSO_ORARIO, Impostazioni, Localita
-from azdora.luoghi import CercaLuoghi, Luoghi, leggi_nome_inverso, leggi_ricerca
+from azdora.luoghi import Luoghi, Luogo, leggi_luogo_inverso, leggi_ricerca
 from azdora.meteo.openmeteo import (
     FonteMeteo,
     OpenMeteo,
@@ -35,6 +39,7 @@ from azdora.meteo.openmeteo import (
     leggi_mare,
     leggi_previsioni,
 )
+from azdora.notizie import LettoreNotizie, Notizia, leggi_feed, ordina, parla_di
 
 CHAT_SIMULATA = 1
 CARTELLA_ESEMPI = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
@@ -98,8 +103,37 @@ class LuoghiDaFile:
     def cerca(self, nome: str) -> Localita | None:
         return leggi_ricerca(self._ricerca)
 
-    def nome_di(self, lat: float, lon: float) -> str | None:
-        return leggi_nome_inverso(self._inverso)
+    def luogo_di(self, lat: float, lon: float) -> Luogo | None:
+        return leggi_luogo_inverso(self._inverso)
+
+
+class NotizieDaFile:
+    """Notizie lette dai feed salvati, filtrate sul comune come quelle vere."""
+
+    FILE = (
+        ("rss_riminitoday.xml", "Rimini Today"),
+        ("rss_altarimini.xml", "Altarimini"),
+        ("rss_chiamamicitta.xml", "Chiamami Città"),
+        ("rss_carlino.xml", "il Resto del Carlino"),
+    )
+
+    def __init__(self, cartella: Path = CARTELLA_ESEMPI) -> None:
+        self._notizie = [
+            n
+            for nome, fonte in self.FILE
+            for n in leggi_feed((cartella / nome).read_bytes(), fonte)
+        ]
+
+    def notizie_per(self, comune: str, lat: float, lon: float, adesso: datetime) -> list[Notizia]:
+        return ordina(n for n in self._notizie if parla_di(n, comune))
+
+
+class AllerteDaFile:
+    def __init__(self, cartella: Path = CARTELLA_ESEMPI) -> None:
+        self._allerte = leggi_allerte(_leggi_json("meteoalarm_italia.json", cartella))
+
+    def allerte(self, paese: str) -> list[Allerta]:
+        return self._allerte if paese == "it" else []
 
 
 def update_simulato(testo: str) -> dict[str, Any]:
@@ -131,19 +165,40 @@ def main(argomenti: list[str] | None = None) -> int:
 
     impostazioni = Impostazioni(token="simulato", chat_personale=CHAT_SIMULATA)
     console = Console(scelte.html)
+    # Memoria finta ma "persistente" per tutta la simulazione, così i controlli funzionano.
+    archivio = ArchivioMemoria(persistente=True)
     with nuovo_client_http() as http:
         if scelte.offline:
             da_file = FonteMeteoDaFile()
             meteo: FonteMeteo = da_file
-            luoghi: CercaLuoghi = LuoghiDaFile()
-            bot = Azdora(impostazioni, console, meteo, luoghi, orologio=da_file.ora_dei_dati)
+            bot = Azdora(
+                impostazioni,
+                console,
+                meteo,
+                LuoghiDaFile(),
+                archivio=archivio,
+                notizie=NotizieDaFile(),
+                allerte=AllerteDaFile(),
+                orologio=da_file.ora_dei_dati,
+            )
         else:
-            bot = Azdora(impostazioni, console, OpenMeteo(http), Luoghi(http))
+            bot = Azdora(
+                impostazioni,
+                console,
+                OpenMeteo(http),
+                Luoghi(http),
+                archivio=archivio,
+                notizie=LettoreNotizie(http),
+                allerte=Meteoalarm(http),
+            )
 
         for testo in scelte.messaggi:
             print(f"\n👤 Tu: {testo}")
             if testo == "mattino":
                 bot.invia_riepilogo_mattutino()
+            elif testo == "controlli":
+                bot.controlli()
+                print("(controlli finiti)")
             else:
                 bot.gestisci_update(update_simulato(testo))
     return 0

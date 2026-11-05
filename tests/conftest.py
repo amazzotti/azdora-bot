@@ -10,9 +10,10 @@ from typing import Any
 
 import pytest
 
+from azdora.archivio import ArchivioMemoria
 from azdora.bot import Azdora
 from azdora.config import FUSO_ORARIO, RICCIONE, Impostazioni, Localita
-from azdora.luoghi import ErroreLuoghi
+from azdora.luoghi import ErroreLuoghi, Luogo
 from azdora.meteo.openmeteo import (
     ErroreMeteo,
     Previsioni,
@@ -25,6 +26,8 @@ FIXTURES = Path(__file__).parent / "fixtures"
 PADRONE = 111
 COPPIA = -222
 SCONOSCIUTO = 999
+MISANO = Luogo("Misano Adriatico", "RN", "Emilia-Romagna", "it", "Italia")
+BOLOGNA = Luogo("Bologna", "BO", "Emilia-Romagna", "it", "Italia")
 # Le fixture sono state scaricate giovedì 5 novembre 2026 alle 9:15.
 ADESSO = datetime(2026, 11, 5, 7, 0, tzinfo=FUSO_ORARIO)
 
@@ -101,9 +104,9 @@ class FintoMeteo:
 
 @dataclass
 class FintiLuoghi:
-    """Conosce solo Misano Adriatico e Bologna; per le coordinate risponde con ``nome``."""
+    """Conosce solo Misano Adriatico e Bologna; per le coordinate risponde con ``luogo``."""
 
-    nome: str | None = "Misano Adriatico (RN)"
+    luogo: Luogo | None = field(default_factory=lambda: MISANO)
     guasto: bool = False
     cercati: list[str] = field(default_factory=list)
 
@@ -121,8 +124,8 @@ class FintiLuoghi:
         lat, lon, nome_ufficiale = trovato
         return Localita(f"geo:{nome}", nome_ufficiale, lat, lon, lat, lon)
 
-    def nome_di(self, lat: float, lon: float) -> str | None:
-        return self.nome
+    def luogo_di(self, lat: float, lon: float) -> Luogo | None:
+        return self.luogo
 
 
 @pytest.fixture
@@ -154,10 +157,21 @@ def luoghi() -> FintiLuoghi:
 
 
 @pytest.fixture
+def archivio() -> ArchivioMemoria:
+    return ArchivioMemoria(persistente=True)
+
+
+@pytest.fixture
 def bot(
-    impostazioni: Impostazioni, messaggero: FintoMessaggero, meteo: FintoMeteo, luoghi: FintiLuoghi
+    impostazioni: Impostazioni,
+    messaggero: FintoMessaggero,
+    meteo: FintoMeteo,
+    luoghi: FintiLuoghi,
+    archivio: ArchivioMemoria,
 ) -> Azdora:
-    return Azdora(impostazioni, messaggero, meteo, luoghi, orologio=lambda: ADESSO)
+    return Azdora(
+        impostazioni, messaggero, meteo, luoghi, archivio=archivio, orologio=lambda: ADESSO
+    )
 
 
 def posizione(

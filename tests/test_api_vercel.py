@@ -46,6 +46,9 @@ def servizi_finti(json_previsioni, json_mare):
         router.get("https://marine-api.open-meteo.com/v1/marine").mock(
             return_value=httpx.Response(200, json=json_mare)
         )
+        router.get(url__startswith="https://feeds.meteoalarm.org/").mock(
+            return_value=httpx.Response(200, json={"warnings": []})
+        )
         invii = router.post(f"{TELEGRAM}/sendMessage").mock(
             return_value=httpx.Response(200, json={"ok": True, "result": {}})
         )

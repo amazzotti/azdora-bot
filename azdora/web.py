@@ -66,8 +66,11 @@ def gestisci_webhook(
     return Risposta(200, {"ok": True})
 
 
-LAVORI: dict[str, Callable[[Azdora], None]] = {
+LAVORI: dict[str, Callable[[Azdora], object]] = {
     "mattino": Azdora.invia_riepilogo_mattutino,
+    "controlli": Azdora.controlli,  # allerte + notizie, ogni 15 minuti
+    "notizie": Azdora.controlla_notizie,
+    "allerte": Azdora.controlla_allerte,
 }
 
 

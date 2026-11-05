@@ -7,8 +7,9 @@ from azdora.luoghi import (
     URL_NOMINATIM,
     ErroreLuoghi,
     Luoghi,
+    Luogo,
     distanza_km,
-    leggi_nome_inverso,
+    leggi_luogo_inverso,
     leggi_ricerca,
     localita_qui,
 )
@@ -69,8 +70,10 @@ def test_ricerca_di_uno_stato_citta_non_ripete_il_nome():
     assert leggi_ricerca(dati).nome == "San Marino"
 
 
-def test_nome_inverso_misano_con_sigla_provincia():
-    assert leggi_nome_inverso(carica("nominatim_misano.json")) == "Misano Adriatico (RN)"
+def test_luogo_inverso_misano():
+    luogo = leggi_luogo_inverso(carica("nominatim_misano.json"))
+    assert luogo == Luogo("Misano Adriatico", "RN", "Emilia-Romagna", "it", "Italia")
+    assert luogo.etichetta == "Misano Adriatico (RN)"
 
 
 @pytest.mark.parametrize(
@@ -86,8 +89,9 @@ def test_nome_inverso_misano_con_sigla_provincia():
         ({}, None),
     ],
 )
-def test_nome_inverso_casi(dati, atteso):
-    assert leggi_nome_inverso(dati) == atteso
+def test_luogo_inverso_casi(dati, atteso):
+    luogo = leggi_luogo_inverso(dati)
+    assert (luogo.etichetta if luogo else None) == atteso
 
 
 def test_localita_qui():
@@ -116,17 +120,17 @@ def test_cerca_con_servizio_giu():
 
 
 @respx.mock
-def test_nome_di_via_http():
+def test_luogo_di_via_http():
     rotta = respx.get(URL_NOMINATIM).mock(
         return_value=httpx.Response(200, json=carica("nominatim_misano.json"))
     )
     with httpx.Client() as http:
-        assert Luoghi(http).nome_di(43.978, 12.697) == "Misano Adriatico (RN)"
+        assert Luoghi(http).luogo_di(43.978, 12.697).etichetta == "Misano Adriatico (RN)"
     assert rotta.calls.last.request.url.params["accept-language"] == "it"
 
 
 @respx.mock
-def test_nome_di_con_nominatim_giu_non_blocca():
+def test_luogo_di_con_nominatim_giu_non_blocca():
     respx.get(URL_NOMINATIM).mock(side_effect=httpx.ConnectError("giù"))
     with httpx.Client() as http:
-        assert Luoghi(http).nome_di(43.978, 12.697) is None
+        assert Luoghi(http).luogo_di(43.978, 12.697) is None

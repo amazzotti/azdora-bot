@@ -2,7 +2,18 @@
 
 from azdora import messaggi
 from azdora.bot import Azdora
-from tests.conftest import ADESSO, COPPIA, PADRONE, SCONOSCIUTO, messaggio, posizione
+from azdora.luoghi import Luogo
+from tests.conftest import (
+    ADESSO,
+    COPPIA,
+    PADRONE,
+    SCONOSCIUTO,
+    messaggio,
+    posizione,
+)
+from tests.conftest import (
+    BOLOGNA as LUOGO_BOLOGNA,
+)
 
 MISANO = (43.978, 12.697)
 BOLOGNA = (44.494, 11.343)
@@ -23,21 +34,21 @@ def test_posizione_sulla_costa(bot, messaggero):
 
 
 def test_posizione_nell_entroterra_senza_mare(bot, messaggero, luoghi):
-    luoghi.nome = "Bologna (BO)"
+    luoghi.luogo = LUOGO_BOLOGNA
     bot.gestisci_update(posizione(*BOLOGNA))
     assert "Bologna (BO)" in messaggero.ultimo
     assert "Mare:" not in messaggero.ultimo
 
 
 def test_posizione_senza_nome_del_luogo(bot, messaggero, luoghi):
-    luoghi.nome = None
+    luoghi.luogo = None
     bot.gestisci_update(posizione(*MISANO))
     assert "📍 <b>La tua posizione</b>" in messaggero.ultimo
     assert "OpenStreetMap" not in messaggero.ultimo
 
 
 def test_nome_del_luogo_con_html_neutralizzato(bot, messaggero, luoghi):
-    luoghi.nome = "<script>"
+    luoghi.luogo = Luogo("<script>")
     bot.gestisci_update(posizione(*MISANO))
     assert "&lt;script&gt;" in messaggero.ultimo
     assert "<script>" not in messaggero.ultimo
