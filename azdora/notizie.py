@@ -375,9 +375,42 @@ class FonteNotizie(Protocol):
         """Sagre, feste ed eventi in Riviera della settimana."""
         ...
 
+    def principali(self, sezione: str, adesso: datetime) -> list[Notizia]:
+        """Le notizie più importanti di "italia" o "mondo", in ordine di importanza."""
+        ...
+
     def del_giorno_in_riviera(self, comune: str, adesso: datetime) -> list[Notizia]:
         """Le ultime notizie di oggi da tutti i giornali della Riviera, il comune in cima."""
         ...
+
+    def tutte_di_oggi(self, adesso: datetime) -> list[Notizia]:
+        """Tutte le notizie di oggi dei giornali locali, pulite e senza doppioni."""
+        ...
+
+
+# --- Italia e mondo -------------------------------------------------------------------------
+
+# Google News mette in ordine di importanza i titoli dei principali giornali; se non
+# risponde, si ripiega su RaiNews (Italia) e ANSA (mondo).
+FONTI_PRINCIPALI = {
+    "italia": (
+        Fonte(
+            "Google News",
+            "https://news.google.com/rss/headlines/section/topic/NATION?hl=it&gl=IT&ceid=IT:it",
+            "Italia",
+        ),
+        Fonte("RaiNews", "https://www.rainews.it/rss/ultimora", "Italia"),
+    ),
+    "mondo": (
+        Fonte(
+            "Google News",
+            "https://news.google.com/rss/headlines/section/topic/WORLD?hl=it&gl=IT&ceid=IT:it",
+            "Mondo",
+        ),
+        Fonte("ANSA", "https://www.ansa.it/sito/notizie/mondo/mondo_rss.xml", "Mondo"),
+    ),
+}
+ETA_PRINCIPALI = timedelta(hours=24)
 
 
 class LettoreNotizie:
@@ -452,3 +485,112 @@ class LettoreNotizie:
             if n.data is None or adesso - n.data <= timedelta(days=GIORNI_EVENTI)
         ]
         return ordina(senza_doppioni(settimana))
+
+    def principali(self, sezione: str, adesso: datetime) -> list[Notizia]:
+        for fonte in FONTI_PRINCIPALI.get(sezione, ()):
+            # Qui conta l'ordine del giornale (dalla più importante), non l'ora.
+            notizie = [
+                n
+                for n in self._scarica(fonte)
+                if not e_spazzatura(n) and (n.data is None or adesso - n.data <= ETA_PRINCIPALI)
+            ]
+            if notizie:
+                return senza_doppioni(notizie)
+        return []
+
+
+# --- Notizie divise per città -----------------------------------------------------------------
+
+# Da nord a sud: (città, emoji, parole che la fanno riconoscere).
+CITTA: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    ("Cervia", "🧂", ("Cervia", "Milano Marittima", "Pinarella", "Tagliata")),
+    ("Cesenatico", "⚓", ("Cesenatico", "Gatteo", "Valverde", "Villamarina")),
+    ("Cesena", "🏛️", ("Cesena",)),
+    ("Bellaria", "🏖️", ("Bellaria", "Igea Marina")),
+    ("Rimini", "🎡", ("Rimini", "Viserba", "Torre Pedrera", "Miramare", "Rivazzurra")),
+    ("Santarcangelo", "🍷", ("Santarcangelo",)),
+    ("Riccione", "🌴", ("Riccione",)),
+    ("Misano", "🏍️", ("Misano",)),
+    ("Cattolica", "⛵", ("Cattolica", "Gabicce", "Gradara")),
+    ("Pesaro", "🎼", ("Pesaro", "Fano")),
+)
+ALTRE = "Dintorni"
+_EMOJI_CITTA = {nome: emoji for nome, emoji, _ in CITTA}
+_SCHEMI_CITTA = [
+    (nome, re.compile(r"\b(?:" + "|".join(re.escape(p) for p in parole) + r")\b", re.IGNORECASE))
+    for nome, _, parole in CITTA
+]
+
+
+def citta_di(notizia: Notizia) -> str:
+    """La città di cui parla una notizia: quella nominata per prima nel titolo, poi nel
+    sommario, nelle etichette o nel nome del giornale; altrimenti la zona del giornale."""
+    for testo in (notizia.titolo, notizia.sommario, " ".join(notizia.categorie), notizia.fonte):
+        trovate = [
+            (m.start(), nome) for nome, schema in _SCHEMI_CITTA if (m := schema.search(testo))
+        ]
+        if trovate:
+            return min(trovate)[1]
+    return notizia.area if notizia.area in _EMOJI_CITTA else ALTRE
+
+
+def citta_del_comune(comune: str) -> str | None:
+    """``"Misano Adriatico"`` → ``"Misano"``; ``"Bologna"`` → ``None``."""
+    for nome, schema in _SCHEMI_CITTA:
+        if schema.search(comune):
+            return nome
+    return None
+
+
+def raggruppa(
+    notizie: Sequence[Notizia],
+    prima: str | None,
+    per_citta: int = 2,
+    nella_prima: int = 4,
+    massimo: int = 16,
+) -> list[tuple[str, list[Notizia]]]:
+    """Notizie divise per città: la tua per prima, poi da nord a sud.
+
+    Si scelgono a giri (una per città, poi la seconda…) così nessuna città resta fuori.
+    """
+    per_nome: dict[str, list[Notizia]] = {}
+    for n in ordina(notizie):
+        per_nome.setdefault(citta_di(n), []).append(n)
+    ordine = [c for c, _, _ in CITTA if c != prima] + [ALTRE]
+    if prima:
+        ordine.insert(0, prima)
+    limiti = {c: (nella_prima if c == prima else per_citta) for c in ordine}
+    scelte: dict[str, list[Notizia]] = {c: [] for c in ordine}
+    totale, giro = 0, 0
+    while totale < massimo and giro < max(limiti.values()):
+        for citta in ordine:
+            coda = per_nome.get(citta, [])
+            if giro < limiti[citta] and giro < len(coda) and totale < massimo:
+                scelte[citta].append(coda[giro])
+                totale += 1
+        giro += 1
+    return [(c, voci) for c, voci in scelte.items() if voci]
+
+
+def formatta_per_citta(
+    gruppi: Sequence[tuple[str, Sequence[Notizia]]], titolo: str, prima: str | None
+) -> str:
+    righe = [titolo]
+    for citta, voci in gruppi:
+        emoji = "📍" if citta == prima else _EMOJI_CITTA.get(citta, "🗞️")
+        righe += ["", f"{emoji} <b>{escape(citta)}</b>"]
+        for n in voci:
+            ora = f" · {n.data.astimezone(FUSO_ORARIO):%H:%M}" if n.data else ""
+            righe.append(
+                f'• <a href="{escape(n.link, quote=True)}">{escape(n.titolo)}</a> '
+                f"<i>({escape(n.fonte)}{ora})</i>"
+            )
+    return "\n".join(righe)
+
+
+def _tutte_di_oggi(lettore: LettoreNotizie, adesso: datetime) -> list[Notizia]:
+    tutte = [n for fonte in lettore._fonti_riviera for n in lettore._scarica(fonte)]
+    return ordina(senza_doppioni(n for n in del_giorno(tutte, adesso) if not e_spazzatura(n)))
+
+
+LettoreNotizie.tutte_di_oggi = _tutte_di_oggi  # type: ignore[attr-defined]

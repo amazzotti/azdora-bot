@@ -443,9 +443,10 @@ def test_notizie_del_giorno_in_riviera(bot, messaggero, notizie):
     ]
     bot.gestisci_update(messaggio("/notizie"))
     testo = messaggero.ultimo
-    assert "Le notizie di oggi, da Cesena a Pesaro" in testo
-    assert '📍 <a href="https://a.it/1">' in testo
-    assert '📰 <a href="https://a.it/2">' in testo
+    assert testo.startswith("🗞️ <b>Le notizie di oggi</b>")
+    assert "Cervia a Pesaro" not in testo
+    assert testo.index("📍 <b>Riccione</b>") < testo.index("🎡 <b>Rimini</b>")
+    assert '<a href="https://a.it/1">' in testo and '<a href="https://a.it/2">' in testo
     assert notizie.richieste == []  # non serve la ricerca per comune
 
 

@@ -106,6 +106,8 @@ COMANDI: tuple[tuple[str, str], ...] = (
     ("weekend", "Meteo del weekend, gite e sagre"),
     ("sagre", "Sagre, fiere e feste da Cervia a Pesaro"),
     ("costa", "Tempo, vento e mare da Cervia a Pesaro"),
+    ("italia", "Le principali notizie dall'Italia"),
+    ("mondo", "Le principali notizie dal mondo"),
     ("orari", "Quando ti scrivo: mattino, sera, notizie, silenzio"),
     ("telefono", "Posizione automatica dal telefono"),
     ("budget", "Budget mensile: /budget 800 o /budget auto 150"),
@@ -136,7 +138,11 @@ NOTIZIE_A_RICHIESTA = 10  # con /notizie se ne vedono di più che negli avvisi a
 RICORDO_NOTIZIE_S = 3 * 24 * 3600
 RICORDO_ZONA_S = 30 * 24 * 3600
 NOTIZIE_NEL_MATTINO = 3
-NOTIZIE_NEL_RIASSUNTO = 8
+NOTIZIE_NEL_RIASSUNTO = 10
+# Italia e mondo: quante in coda a /notizie, ai riassunti e al riepilogo del mattino.
+PRINCIPALI_IN_CODA = 3
+PRINCIPALI_AL_MATTINO = 2
+PRINCIPALI_A_RICHIESTA = 8
 PAUSA_AVVISI_S = 4 * 3600  # lo stesso avviso meteo non prima di 4 ore
 # Come li chiamano tutti in Romagna → il nome vero, per cercarli.
 SOPRANNOMI = {
@@ -246,6 +252,8 @@ class Azdora:
             "weekend": self._weekend,
             "sagre": self._sagre,
             "costa": self._costa,
+            "italia": self._italia,
+            "mondo": self._mondo,
             "orari": self._orari,
             "telefono": self._telefono,
             "budget": self._budget,
@@ -572,13 +580,15 @@ class Azdora:
         comune, lat, lon = zona
         adesso = self.orologio()
         if not comando.argomenti and modulo_notizie.in_zona(lat, lon):
-            # Tra Cesena e Pesaro: le notizie del giorno da tutti i giornali, il comune in cima.
-            del_giorno = self.notizie.del_giorno_in_riviera(comune, adesso)
-            if del_giorno:
-                testo = modulo_notizie.formatta(
-                    del_giorno, messaggi.titolo_notizie_riviera(comune), evidenzia=comune
+            # In zona: le notizie di oggi divise per città, la tua per prima.
+            gruppi = modulo_notizie.raggruppa(
+                self._tutte_di_oggi(comune, adesso), modulo_notizie.citta_del_comune(comune)
+            )
+            if gruppi:
+                testo = modulo_notizie.formatta_per_citta(
+                    gruppi, messaggi.TITOLO_NOTIZIE_OGGI, modulo_notizie.citta_del_comune(comune)
                 )
-                self.messaggero.invia_messaggio(chat.id, testo)
+                self.messaggero.invia_messaggio(chat.id, testo + self._coda_principali(adesso))
                 return
         trovate = self.notizie.notizie_per(comune, lat, lon, adesso)
         titolo_comune = comune
@@ -1410,6 +1420,10 @@ class Azdora:
                 and (nuove := self._notizie_nuove(chat_id, NOTIZIE_NEL_MATTINO))
             ):
                 parti.append(modulo_notizie.formatta_breve(nuove, "🗞️ <b>Le prime notizie</b>"))
+            if self.notizie is not None and self.archivio.persistente:
+                coda, _ = self._principali_nuove(chat_id, PRINCIPALI_AL_MATTINO)
+                if coda:
+                    parti.append(coda.strip())
         except ErroreArchivio as errore:
             log.warning("Extra del mattino saltati: %s", errore)
         return "\n\n".join(p for p in parti if p)
@@ -1422,14 +1436,10 @@ class Azdora:
         trovate = list(self.notizie.notizie_per(zona.comune, zona.lat, zona.lon, adesso))
         if modulo_notizie.in_zona(zona.lat, zona.lon):
             trovate += self.notizie.del_giorno_in_riviera(zona.comune, adesso)
-        trovate = modulo_notizie.senza_doppioni(trovate)
-        if not trovate:
-            return []
-        nuove_flag = self.archivio.segna_nuovi(
-            [f"notizia:{chat_id}:{n.impronta}" for n in trovate], RICORDO_NOTIZIE_S
-        )
-        nuove = [n for n, nuova in zip(trovate, nuove_flag, strict=True) if nuova]
-        return modulo_notizie.prima_quelle_di(nuove, zona.comune)[:quante]
+        nuove = self._mai_viste(chat_id, modulo_notizie.senza_doppioni(trovate))
+        scelte = modulo_notizie.prima_quelle_di(nuove, zona.comune)[:quante]
+        self._segna_viste(chat_id, scelte)
+        return scelte
 
     def _riassunto_notizie(self, chat_id: int, orari: Orari, adesso: datetime) -> int:
         """Agli orari scelti: un solo messaggio con le notizie nuove (non una per volta)."""
@@ -1444,15 +1454,26 @@ class Azdora:
         )
         if not nuovo:
             return 0
-        notizie = self._notizie_nuove(chat_id, NOTIZIE_NEL_RIASSUNTO)
-        if not notizie:
-            return 0
         zona = self.zona(chat_id)
-        titolo = messaggi.titolo_riassunto(zona.etichetta, momento)
-        self.messaggero.invia_messaggio(
-            chat_id, modulo_notizie.formatta(notizie, titolo, evidenzia=zona.comune)
-        )
-        return len(notizie)
+        citta = modulo_notizie.citta_del_comune(zona.comune)
+        if modulo_notizie.in_zona(zona.lat, zona.lon):
+            candidate = self._mai_viste(chat_id, self._tutte_di_oggi(zona.comune, adesso))
+            gruppi = modulo_notizie.raggruppa(
+                candidate, citta, per_citta=3, nella_prima=4, massimo=NOTIZIE_NEL_RIASSUNTO
+            )
+        else:
+            fuori = self._notizie_nuove_senza_segnare(chat_id, zona, adesso)
+            gruppi = [(zona.comune, fuori[:NOTIZIE_NEL_RIASSUNTO])] if fuori else []
+            citta = zona.comune
+        scelte = [n for _, voci in gruppi for n in voci]
+        self._segna_viste(chat_id, scelte)
+        coda, principali = self._principali_nuove(chat_id, PRINCIPALI_IN_CODA)
+        if not scelte and not principali:
+            return 0
+        titolo = messaggi.titolo_riassunto(momento)
+        testo = modulo_notizie.formatta_per_citta(gruppi, titolo, citta) if gruppi else titolo
+        self.messaggero.invia_messaggio(chat_id, testo + coda)
+        return len(scelte) + principali
 
     def controlla_imminente(self) -> int:
         """Pioggia, temporali, neve, raffiche nelle prossime 2 ore, per dove sei."""
@@ -1494,3 +1515,83 @@ class Azdora:
         chiave = collegamenti.crea(chat.id)
         indirizzo = self.impostazioni.indirizzo or "https://il-tuo-progetto.vercel.app"
         self.messaggero.invia_messaggio(chat.id, modulo_telefono.istruzioni(indirizzo, chiave))
+
+    # --- Italia e mondo -------------------------------------------------------------------
+
+    def _principali(self, sezione: str, adesso: datetime) -> list[Notizia]:
+        """Le notizie nazionali o dal mondo; vuoto se la fonte non le offre (es. nei test)."""
+        leggi = getattr(self.notizie, "principali", None)
+        return list(leggi(sezione, adesso)) if leggi is not None else []
+
+    def _coda_principali(self, adesso: datetime, quante: int = PRINCIPALI_IN_CODA) -> str:
+        """In fondo a /notizie: le prime di Italia e mondo, in forma compatta."""
+        parti = []
+        for sezione in ("italia", "mondo"):
+            if voci := self._principali(sezione, adesso)[:quante]:
+                parti.append(
+                    modulo_notizie.formatta_breve(voci, messaggi.TITOLI_PRINCIPALI[sezione])
+                )
+        return "".join(f"\n\n{p}" for p in parti)
+
+    def _principali_nuove(self, chat_id: int, quante: int) -> tuple[str, int]:
+        """Italia e mondo non ancora mandate a questa persona (per riassunti e mattino)."""
+        adesso = self.orologio()
+        parti, totale = [], 0
+        for sezione in ("italia", "mondo"):
+            voci = self._principali(sezione, adesso)
+            if not voci:
+                continue
+            nuove = self._mai_viste(chat_id, voci)[:quante]
+            self._segna_viste(chat_id, nuove)
+            if nuove:
+                parti.append(
+                    modulo_notizie.formatta_breve(nuove, messaggi.TITOLI_PRINCIPALI[sezione])
+                )
+                totale += len(nuove)
+        return "".join(f"\n\n{p}" for p in parti), totale
+
+    def _sezione(self, chat: Chat, sezione: str) -> None:
+        voci = self._principali(sezione, self.orologio())[:PRINCIPALI_A_RICHIESTA]
+        if not voci:
+            self.messaggero.invia_messaggio(chat.id, messaggi.NESSUNA_PRINCIPALE)
+            return
+        self.messaggero.invia_messaggio(
+            chat.id, modulo_notizie.formatta(voci, messaggi.TITOLI_SEZIONE[sezione])
+        )
+
+    def _italia(self, chat: Chat, comando: Comando) -> None:
+        self._sezione(chat, "italia")
+
+    def _mondo(self, chat: Chat, comando: Comando) -> None:
+        self._sezione(chat, "mondo")
+
+    # --- Notizie già viste ------------------------------------------------------------------
+
+    def _mai_viste(self, chat_id: int, notizie: list[Notizia]) -> list[Notizia]:
+        """Le notizie mai mandate a questa persona (senza segnarle: si segnano solo quelle
+        mostrate davvero, così le altre restano per il riassunto successivo)."""
+        if not notizie:
+            return []
+        flag = self.archivio.sono_nuovi([f"notizia:{chat_id}:{n.impronta}" for n in notizie])
+        return [n for n, nuova in zip(notizie, flag, strict=True) if nuova]
+
+    def _segna_viste(self, chat_id: int, notizie: list[Notizia]) -> None:
+        if notizie:
+            self.archivio.segna_nuovi(
+                [f"notizia:{chat_id}:{n.impronta}" for n in notizie], RICORDO_NOTIZIE_S
+            )
+
+    def _tutte_di_oggi(self, comune: str, adesso: datetime) -> list[Notizia]:
+        """Tutte le notizie locali di oggi (o, per fonti più semplici, quelle del giorno)."""
+        assert self.notizie is not None
+        tutte = getattr(self.notizie, "tutte_di_oggi", None)
+        if tutte is not None:
+            return list(tutte(adesso))
+        return list(self.notizie.del_giorno_in_riviera(comune, adesso))
+
+    def _notizie_nuove_senza_segnare(
+        self, chat_id: int, zona: Zona, adesso: datetime
+    ) -> list[Notizia]:
+        assert self.notizie is not None
+        trovate = self.notizie.notizie_per(zona.comune, zona.lat, zona.lon, adesso)
+        return self._mai_viste(chat_id, modulo_notizie.senza_doppioni(trovate))

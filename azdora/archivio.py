@@ -37,6 +37,10 @@ class Archivio(Protocol):
         """Segna le chiavi come "viste"; per ognuna dice se era nuova (mai vista prima)."""
         ...
 
+    def sono_nuovi(self, chiavi: Sequence[str]) -> list[bool]:
+        """Per ogni chiave: non è mai stata vista? (senza segnarla)."""
+        ...
+
 
 class ArchivioMemoria:
     """Archivio in memoria, con scadenze vere. Non sopravvive alla fine del processo.
@@ -71,6 +75,9 @@ class ArchivioMemoria:
 
     def cancella(self, chiave: str) -> None:
         self._dati.pop(chiave, None)
+
+    def sono_nuovi(self, chiavi: Sequence[str]) -> list[bool]:
+        return [self._valido(c) is None for c in chiavi]
 
     def segna_nuovi(self, chiavi: Sequence[str], scadenza_s: int) -> list[bool]:
         risultati = []
@@ -134,6 +141,9 @@ class ArchivioUpstash:
 
     def cancella(self, chiave: str) -> None:
         self._pipeline([["DEL", self._k(chiave)]])
+
+    def sono_nuovi(self, chiavi: Sequence[str]) -> list[bool]:
+        return [r == 0 for r in self._pipeline([["EXISTS", self._k(c)] for c in chiavi])]
 
     def segna_nuovi(self, chiavi: Sequence[str], scadenza_s: int) -> list[bool]:
         # SET ... NX risponde "OK" solo se la chiave non esisteva.

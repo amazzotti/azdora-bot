@@ -168,6 +168,10 @@ class NotizieDaFile:
     def eventi(self, adesso: datetime) -> list[Notizia]:
         return ordina(n for n in self._notizie if e_un_evento(n))
 
+    def principali(self, sezione: str, adesso: datetime) -> list[Notizia]:
+        file = {"italia": "rss_italia.xml", "mondo": "rss_mondo.xml"}.get(sezione)
+        return leggi_feed((CARTELLA_ESEMPI / file).read_bytes(), "Google News") if file else []
+
 
 class AllerteDaFile:
     def __init__(self, cartella: Path = CARTELLA_ESEMPI) -> None:

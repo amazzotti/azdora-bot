@@ -140,3 +140,13 @@ def test_crea_archivio_sceglie_upstash_solo_se_configurato():
 def test_impostazioni_archivio_con_entrambi_i_nomi(env):
     impostazioni = Impostazioni.da_env(env)
     assert (impostazioni.archivio_url, impostazioni.archivio_token) == (URL, "t")
+
+
+@respx.mock
+def test_upstash_sono_nuovi(upstash):
+    rotta = respx.post(f"{URL}/pipeline").mock(return_value=_risposta(1, 0))
+    assert upstash.sono_nuovi(["a", "b"]) == [False, True]
+    assert json.loads(rotta.calls.last.request.content) == [
+        ["EXISTS", "azdora:a"],
+        ["EXISTS", "azdora:b"],
+    ]

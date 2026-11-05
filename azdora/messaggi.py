@@ -193,7 +193,8 @@ AIUTO = """👋 <b>Ciao, sono l'Azdora!</b> Mando avanti la casa. Scrivimi come 
 /aria – UV, qualità dell'aria e pollini · /qui – manda la posizione
 
 🗞️ <b>Intorno a te</b>
-/notizie – le notizie di oggi, da Cesena a Pesaro
+/notizie – le notizie di oggi divise per città, più Italia e mondo
+/italia · /mondo – le principali notizie nazionali e dal mondo
 /allerte – allerte meteo · /benzina – i distributori più economici
 /dove · /dimentica – la posizione che ricordo
 
@@ -287,10 +288,13 @@ def titolo_notizie(etichetta: str, nuove: bool) -> str:
 
 
 def titolo_notizie_riviera(comune: str) -> str:
-    return f"🗞️ <b>Le notizie di oggi, da Cesena a Pesaro</b>\n<i>📍 = parla di {escape(comune)}</i>"
+    return f"🗞️ <b>Le notizie di oggi, da Cervia a Pesaro</b>\n<i>📍 = parla di {escape(comune)}</i>"
 
 
-def titolo_riassunto(etichetta: str, momento) -> str:
+TITOLO_NOTIZIE_OGGI = "🗞️ <b>Le notizie di oggi</b>"
+
+
+def titolo_riassunto(momento) -> str:
     saluto = (
         "del mattino"
         if momento.hour < 12
@@ -298,7 +302,17 @@ def titolo_riassunto(etichetta: str, momento) -> str:
         if momento.hour < 15
         else ("del pomeriggio" if momento.hour < 18 else "della sera")
     )
-    return f"🗞️ <b>Le notizie {saluto}</b> · <i>📍 = {escape(etichetta)}</i>"
+    return f"🗞️ <b>Le notizie {saluto}</b>"
+
+
+TITOLI_PRINCIPALI = {"italia": "🇮🇹 <b>Italia</b>", "mondo": "🌍 <b>Mondo</b>"}
+TITOLI_SEZIONE = {
+    "italia": "🇮🇹 <b>Le principali notizie dall'Italia</b>",
+    "mondo": "🌍 <b>Le principali notizie dal mondo</b>",
+}
+NESSUNA_PRINCIPALE = (
+    "🗞️ In questo momento non riesco a leggere le notizie nazionali. Riprova tra poco."
+)
 
 
 def nessuna_notizia(etichetta: str) -> str:
