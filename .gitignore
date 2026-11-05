@@ -1,0 +1,28 @@
+# Segreti: non devono MAI finire nel repo
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Strumenti
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Vercel
+.vercel/
+
+# Editor e sistema
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

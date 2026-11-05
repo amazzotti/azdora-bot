@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "azdora-bot"
+version = "0.1.0"
+description = "Bot Telegram personale per Rimini e Riccione: meteo, vento, mare e riepilogo mattutino."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Alessandro Mazzotti" }]
+keywords = ["telegram", "bot", "meteo", "open-meteo", "rimini", "riccione"]
+dependencies = [
+    "httpx>=0.27,<1",
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "respx>=0.21",
+    "ruff>=0.6",
+]
+
+[project.urls]
+Repository = "https://github.com/amazzotti/azdora-bot"
+
+[tool.setuptools.packages.find]
+include = ["azdora*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["azdora"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+# Il testo del bot è in italiano e usa volutamente simboli come frecce e trattini.
+ignore = ["RUF001", "RUF002", "RUF003"]
