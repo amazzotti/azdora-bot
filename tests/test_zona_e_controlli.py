@@ -370,3 +370,55 @@ def test_chat_personale_mancante(messaggero, meteo, notizie):
 def test_ora_italiana_nei_dati_di_prova():
     assert ADESSO.tzinfo is not None and ADESSO.utcoffset() == timedelta(hours=1)
     assert isinstance(ADESSO, datetime)
+
+
+# --- I comandi senza località seguono la posizione ------------------------------------------
+
+
+def test_meteo_senza_localita_usa_dove_sei(bot, messaggero, luoghi):
+    luoghi.luogo = BOLOGNA
+    bot.gestisci_update(posizione(*BOLOGNA_XY))
+    for comando, titolo in [("/meteo", "Meteo a Bologna (BO)"), ("/vento", "Vento a Bologna (BO)")]:
+        bot.gestisci_update(messaggio(comando))
+        assert titolo in messaggero.ultimo
+    bot.gestisci_update(messaggio("/mare"))
+    assert "Bologna (BO) è lontano dal mare" in messaggero.ultimo
+
+
+def test_localita_scritta_vince_sulla_posizione(bot, messaggero, luoghi):
+    luoghi.luogo = BOLOGNA
+    bot.gestisci_update(posizione(*BOLOGNA_XY))
+    bot.gestisci_update(messaggio("/meteo rimini"))
+    assert "Meteo a Rimini" in messaggero.ultimo
+
+
+def test_senza_posizione_si_torna_a_casa(bot, messaggero, orologio, luoghi):
+    luoghi.luogo = BOLOGNA
+    bot.gestisci_update(posizione(*BOLOGNA_XY))
+    orologio.adesso = ADESSO + timedelta(days=4)
+    bot.gestisci_update(messaggio("/meteo"))
+    assert "Meteo a Riccione" in messaggero.ultimo
+
+
+def test_il_gruppo_usa_la_posizione_del_padrone(bot, messaggero, luoghi):
+    luoghi.luogo = BOLOGNA
+    bot.gestisci_update(posizione(*BOLOGNA_XY))
+    bot.gestisci_update(messaggio("/vento", chat_id=COPPIA, tipo="group", mittente=7))
+    assert "Vento a Bologna (BO)" in messaggero.ultimo
+
+
+def test_oggi_e_domani_lontano_da_casa(bot, messaggero, luoghi):
+    luoghi.luogo = BOLOGNA
+    bot.gestisci_update(posizione(*BOLOGNA_XY))
+    bot.gestisci_update(messaggio("/oggi"))
+    assert messaggero.ultimo.index("Bologna (BO)") < messaggero.ultimo.index("Riccione")
+    bot.gestisci_update(messaggio("/domani"))
+    assert messaggero.ultimo.index("Bologna (BO)") < messaggero.ultimo.index("Riccione")
+
+
+def test_comandi_con_archivio_giu_usano_casa(impostazioni, messaggero, meteo):
+    bot = Azdora(
+        impostazioni, messaggero, meteo, archivio=ArchivioGuasto(), orologio=lambda: ADESSO
+    )
+    bot.gestisci_update(messaggio("/meteo"))
+    assert "Meteo a Riccione" in messaggero.ultimo

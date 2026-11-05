@@ -5,8 +5,13 @@
 ![Costo: 0 €](https://img.shields.io/badge/costo-0%20%E2%82%AC-brightgreen)
 [![Licenza MIT](https://img.shields.io/badge/licenza-MIT-lightgrey)](LICENSE)
 
-**Bot Telegram personale per chi vive tra Riccione e Rimini.**
+**Bot Telegram personale che ti segue ovunque: meteo, vento, mare, notizie e allerte del posto in cui ti trovi, più scadenze, spese e una lista condivisa.**
+
 In Romagna l'*azdora* è chi manda avanti la casa: sa che tempo fa, si ricorda le scadenze e dice a tutti cosa c'è da fare. Questo bot fa lo stesso, su Telegram.
+
+- 📍 **Dove sei tu.** Mandagli la posizione, anche quella in tempo reale. Meteo, vento, mare, notizie e allerte riguardano il comune e la regione in cui ti trovi: Misano, Bologna, la montagna o una gita all'estero.
+- 🔎 **Dove vuoi tu.** `/meteo cesenatico`, `/vento san marino`, `/notizie bologna`: qualsiasi comune, cercato per nome.
+- 🏠 **Casa in Riviera.** Se non sa dove sei, usa casa: Riccione e Rimini, con i giornali locali e i venti dell'Adriatico chiamati per nome.
 
 > 🇬🇧 English summary at the [bottom of the page](#-english-summary).
 
@@ -16,15 +21,15 @@ In Romagna l'*azdora* è chi manda avanti la casa: sa che tempo fa, si ricorda l
 
 | Comando | Cosa risponde |
 |---|---|
-| `/oggi` | Riepilogo di oggi per Riccione e Rimini: meteo, vento, mare, alba e tramonto, consigli pratici |
+| `/oggi` | Riepilogo di oggi: meteo, vento, mare, alba e tramonto, consigli pratici. Mostra casa (Riccione e Rimini) e, se sei lontano, prima il posto in cui ti trovi |
 | `/domani` | Lo stesso, per domani |
-| `/meteo [località]` | Condizioni attuali e previsioni dei prossimi 3 giorni, per **qualsiasi comune** (`/meteo cesenatico`) |
+| `/meteo [località]` | Condizioni attuali e previsioni dei prossimi giorni **dove sei**, oppure in **qualsiasi comune** scritto (`/meteo cesenatico`) |
 | `/vento [località]` | Vento adesso, ogni 3 ore e giorno per giorno, con i nomi dei venti dell'Adriatico (**garbino**, bora, scirocco, maestrale…), nodi e scala Beaufort |
-| `/mare [località]` | Altezza, direzione e periodo delle onde, stato del mare (scala Douglas), temperatura dell'acqua. Nell'entroterra ti dice che il mare è lontano |
+| `/mare [località]` | Altezza, direzione e periodo delle onde, stato del mare (scala Douglas), temperatura dell'acqua, su qualsiasi costa. Nell'entroterra ti dice che il mare è lontano |
 | `/qui` | Mostra il pulsante **📍 Manda la mia posizione** |
 | 📍 *posizione* | Se mandi la tua posizione (anche con 📎 → Posizione, anche **in tempo reale**), ti risponde con meteo, vento, mare e consigli **per il punto in cui sei**, e per 3 giorni notizie e allerte seguono te |
-| `/notizie [località]` | Ultime notizie della tua zona, con il link: giornali della Riviera e Google News |
-| `/allerte` | Allerte meteo (gialla, arancione, rossa) della regione in cui ti trovi |
+| `/notizie [località]` | Ultime notizie del comune in cui sei (o di quello scritto), con il link: Google News ovunque, più i giornali locali quando sei in Riviera |
+| `/allerte` | Allerte meteo (gialla, arancione, rossa) della regione in cui ti trovi, in Italia e in diversi paesi europei |
 | `/dove` · `/dimentica` | Dove il bot crede che tu sia · cancella la posizione salvata |
 | `/scadenza 31/01 bollo auto 180€ annuale` | Segna una scadenza: data, cosa, importo e ricorrenza (mensile, bimestrale, annuale…) in qualsiasi ordine |
 | `/scadenze` | Tutte le scadenze, con i pulsanti **✅ Pagato** e **🗑**. Se paghi una scadenza ricorrente, si sposta alla volta dopo e l'importo finisce tra le spese |
@@ -36,7 +41,7 @@ In Romagna l'*azdora* è chi manda avanti la casa: sa che tempo fa, si ricorda l
 | `/id` | L'id della chat, da usare nella configurazione |
 | `/aiuto` | L'elenco dei comandi |
 
-Senza località i comandi usano Riccione.
+**Senza località, i comandi usano il posto in cui sei**: l'ultima posizione che hai mandato negli ultimi 3 giorni. Se non sa dove sei, usa casa (Riccione). Nel gruppo di coppia vale la posizione del gruppo o, se manca, la tua.
 
 In più, da sola:
 - **ogni mattina alle 7** l'Azdora manda il riepilogo della giornata. Se sei lontano da casa, aggiunge il meteo di dove sei; se ci sono allerte, le mette in fondo. Poi arrivano i **promemoria delle scadenze**: 30, 7 e 1 giorno prima, il giorno stesso, e se sono scadute e non pagate. Il **1° del mese** arriva anche il **resoconto delle spese** del mese prima;
@@ -273,7 +278,7 @@ azdora-bot/
 
 ## 🇬🇧 English summary
 
-**Azdora** is a personal Telegram bot for people living in Riccione and Rimini, on Italy's Adriatic coast. *Azdora* is the Romagna dialect word for the person who runs the household.
+**Azdora** is a personal Telegram bot that follows you wherever you are. Share your location and weather, wind, sea, local news and weather alerts are about the town and region you're in; ask for any town by name; when it doesn't know where you are, it falls back to home in Riccione and Rimini, on Italy's Adriatic coast. *Azdora* is the Romagna dialect word for the person who runs the household.
 
 - **Features:**
   - current weather and 3-day forecasts;

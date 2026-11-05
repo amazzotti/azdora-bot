@@ -38,6 +38,7 @@ from azdora.notizie import FonteNotizie, Notizia
 from azdora.posizione import (
     SPOSTAMENTO_MINIMO_KM,
     VALIDITA_ZONA,
+    ZONA_CASA,
     MemoriaPosizione,
     Posizione,
     Zona,
@@ -85,7 +86,7 @@ TIPI_GRUPPO = frozenset({"group", "supergroup"})
 
 # Oltre questa distanza il punto marino di Open-Meteo non descrive più "il mare lì davanti".
 DISTANZA_MASSIMA_MARE_KM = 30
-# Se sei più lontano di così da Riccione e Rimini, il riepilogo aggiunge il meteo di dove sei.
+# Se sei più lontano di così da casa (Riccione e Rimini), il riepilogo aggiunge dove sei.
 DISTANZA_DA_CASA_KM = 15
 
 # Notizie: quante al massimo per messaggio e per quanto ricordarle come già mandate.
@@ -273,9 +274,24 @@ class Azdora:
 
     # --- Località e mare --------------------------------------------------------------
 
+    def _zona_della_chat(self, chat: Chat) -> Zona:
+        """Dove si trova chi scrive: la posizione della chat, poi quella del padrone, poi casa."""
+        try:
+            zona = self.posizioni.zona(chat.id, self.orologio())
+            if not zona.da_posizione and chat.id != self.impostazioni.chat_personale:
+                zona = self.zona()
+        except ErroreArchivio as errore:
+            log.warning("Zona non disponibile, uso casa: %s", errore)
+            return ZONA_CASA
+        return zona
+
     def _localita_richiesta(self, chat: Chat, comando: Comando) -> Localita | None:
-        """Riccione/Rimini (anche abbreviate) o qualsiasi comune, cercato per nome."""
+        """Il posto scritto (Riccione, "rn", qualsiasi comune) o, se manca, dove sei adesso."""
         testo = comando.testo_argomenti
+        if not testo.strip():
+            zona = self._zona_della_chat(chat)
+            if zona.da_posizione:
+                return localita_qui(zona.lat, zona.lon, zona.etichetta)
         localita = trova_localita(testo)
         if localita is None and self.luoghi is not None:
             localita = self.luoghi.cerca(testo)
@@ -426,9 +442,7 @@ class Azdora:
             if localita is None:
                 return None
             return localita.nome.split(" (")[0], localita.lat, localita.lon
-        zona = self.posizioni.zona(chat.id, self.orologio())
-        if not zona.da_posizione and chat.id != self.impostazioni.chat_personale:
-            zona = self.zona()
+        zona = self._zona_della_chat(chat)
         return zona.comune, zona.lat, zona.lon
 
     def _notizie(self, chat: Chat, comando: Comando) -> None:
@@ -463,16 +477,18 @@ class Azdora:
         return modulo_allerte.formatta(attive, zona.regione, messaggi.titolo_allerte(zona.regione))
 
     def _oggi(self, chat: Chat, comando: Comando) -> None:
-        self.messaggero.invia_messaggio(chat.id, self.testo_oggi(saluta=False))
+        zona = self._zona_della_chat(chat)
+        self.messaggero.invia_messaggio(chat.id, self.testo_oggi(saluta=False, zona=zona))
 
     def _domani(self, chat: Chat, comando: Comando) -> None:
         domani = self.orologio().date() + timedelta(days=1)
-        self.messaggero.invia_messaggio(chat.id, riepilogo_domani(self._dati_localita(), domani))
+        dati = self._dati_localita(self._zona_della_chat(chat))
+        self.messaggero.invia_messaggio(chat.id, riepilogo_domani(dati, domani))
 
     # --- Riepiloghi -------------------------------------------------------------------
 
     def _dati_localita(self, zona: Zona | None = None) -> list[DatiLocalita]:
-        """Riccione e Rimini; se sei lontano da casa, prima il posto dove sei."""
+        """Casa (Riccione e Rimini); se sei lontano, prima il posto in cui ti trovi."""
         luoghi = list(LOCALITA)
         if zona is not None and zona.da_posizione and self._lontano_da_casa(zona):
             luoghi.insert(0, localita_qui(zona.lat, zona.lon, zona.etichetta))
@@ -488,9 +504,9 @@ class Azdora:
             for casa in LOCALITA
         )
 
-    def testo_oggi(self, saluta: bool) -> str:
+    def testo_oggi(self, saluta: bool, zona: Zona | None = None) -> str:
         nome = self.impostazioni.nome_utente if saluta else ""
-        zona = self._zona_sicura()
+        zona = zona if zona is not None else self._zona_sicura()
         avvisi = []
         if zona is not None and (testo := self._testo_allerte(zona, solo_se_ci_sono=True)):
             avvisi.append(testo)

@@ -185,8 +185,8 @@ Mando avanti la casa: tempo, notizie, scadenze, spese e cose da fare.
 
 🌤️ <b>Meteo</b>
 /oggi · /domani – riepilogo con consigli
-/meteo · /vento · /mare – anche per altri posti: <code>/vento cesenatico</code>
-/qui – meteo dove ti trovi 📍
+/meteo · /vento · /mare – dove sei, o dove vuoi: <code>/vento cesenatico</code>
+/qui – mandami la posizione e ti dico che tempo fa lì 📍
 
 🗞️ <b>Intorno a te</b>
 /notizie – ultime notizie della zona
@@ -205,8 +205,9 @@ Mando avanti la casa: tempo, notizie, scadenze, spese e cose da fare.
 /aggiungi latte, pane · /lista · /svuota – la lista condivisa
 /weekend – meteo, gite della domenica e sagre
 
-Ogni mattina alle 7 ti mando il riepilogo ☕ con i promemoria; notizie e allerte nuove
-arrivano appena escono. Mandami la posizione (anche in tempo reale) e ti seguo.
+Mandami la posizione (anche in tempo reale) e meteo, notizie e allerte seguono te,
+ovunque tu sia; se non so dove sei, uso casa (Riccione).
+Ogni mattina alle 7 ti mando il riepilogo ☕ con i promemoria.
 /id – l'id di questa chat"""
 
 CREDITI_OSM = '<i>Luogo: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a></i>'
