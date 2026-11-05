@@ -73,8 +73,15 @@ def test_comando_sconosciuto(bot, messaggero):
     assert "Non conosco questo comando" in messaggero.ultimo
 
 
-def test_testo_normale_ignorato(bot, messaggero):
+def test_testo_normale_in_privato_spiega_cosa_scrivere(bot, messaggero):
+    from azdora import messaggi as testi
+
     bot.gestisci_update(messaggio("ciao azdora"))
+    assert messaggero.ultimo == testi.NON_HO_CAPITO
+
+
+def test_testo_normale_nel_gruppo_ignorato(bot, messaggero):
+    bot.gestisci_update(messaggio("ciao a tutti", chat_id=COPPIA, tipo="group", mittente=7))
     assert messaggero.inviati == []
 
 

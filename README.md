@@ -20,6 +20,19 @@ In Romagna l'*azdora* è chi manda avanti la casa: sa che tempo fa, si ricorda l
 
 ## ✨ Cosa sa fare
 
+### 💬 Scrivigli come parli
+Non serve ricordarsi i comandi:
+
+| Scrivi… | …e l'Azdora |
+|---|---|
+| `45 benzina` · `ho speso 12,50 per la pizza` · `pagato 80€ di bolletta luce` | segna la spesa, indovina la categoria e mostra i pulsanti **🏷️ Cambia categoria** e **↩️ Annulla**. Se correggi una categoria, la volta dopo la sceglie da sola |
+| `ricordami domani alle 18 di chiamare il meccanico` · `ricordami tra 2 ore…` · `ricordami venerdì…` | crea un promemoria e te lo manda all'ora giusta |
+| 📍 la tua posizione | ti dà meteo, vento, mare e consigli di quel punto, e da lì in poi segue te |
+
+Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `spesa` (o `+`) e `ricordami`: `spesa 60 conad`, `+12 pizza`.
+
+### 📋 Tutti i comandi
+
 | Comando | Cosa risponde |
 |---|---|
 | `/oggi` | Riepilogo di oggi: meteo, vento, mare, alba e tramonto, consigli pratici. Mostra casa (Riccione e Rimini) e, se sei lontano, prima il posto in cui ti trovi |
@@ -39,6 +52,13 @@ In Romagna l'*azdora* è chi manda avanti la casa: sa che tempo fa, si ricorda l
 | `/esporta [anno]` | Il file CSV delle spese dell'anno, pronto per Excel |
 | `/aggiungi latte, pane` · `/lista` · `/svuota` | La lista condivisa: si spunta toccando le voci. Nel gruppo di coppia mostra chi ha aggiunto cosa |
 | `/weekend` | Meteo di sabato e domenica, tre idee per un giro (al coperto se piove) e le sagre ed eventi della settimana |
+| `/budget 800` · `/budget auto 150` | Budget mensile, totale o per categoria. Sotto ogni spesa vedi a che punto sei, con ⚠️ all'80% e 🚨 quando lo superi |
+| `/conti` · `/pareggio` | **Nel gruppo**: ogni spesa ricorda chi l'ha pagata. `/conti` dice chi deve quanto a chi (spese divise in parti uguali, con il minor numero di passaggi); `/pareggio` riparte da zero |
+| `/promemoria` · `/ricordami …` | I promemoria in arrivo, con 🗑 per cancellarli |
+| `/rifiuti martedì plastica, carta` | Il calendario della raccolta differenziata: la sera prima, verso le 20, ti dice cosa portare fuori |
+| `/sera` | Attiva o spegne il **riepilogo delle 20**: meteo di domani, promemoria e scadenze del giorno dopo |
+| `/aria [località]` | Indice UV con consiglio, qualità dell'aria e pollini (graminacee, betulla, olivo, ambrosia…). Nel riepilogo compaiono solo quando servono |
+| `/benzina [gasolio\|gpl\|metano] [località]` | I 5 distributori più economici entro 7 km, con prezzo, self/servito, distanza e link alla mappa, dai dati ufficiali del Ministero |
 | `/id` | L'id della chat, da usare nella configurazione |
 | `/aiuto` | L'elenco dei comandi |
 
@@ -46,7 +66,8 @@ In Romagna l'*azdora* è chi manda avanti la casa: sa che tempo fa, si ricorda l
 
 In più, da sola:
 - **ogni mattina alle 7** l'Azdora manda il riepilogo della giornata. Se sei lontano da casa, aggiunge il meteo di dove sei; se ci sono allerte, le mette in fondo. Poi arrivano i **promemoria delle scadenze**: 30, 7 e 1 giorno prima, il giorno stesso, e se sono scadute e non pagate. Il **1° del mese** arriva anche il **resoconto delle spese** del mese prima;
-- **ogni 15 minuti** controlla se ci sono **notizie nuove** sul comune in cui ti trovi e **allerte nuove** nella tua regione, e te le manda con il link. Non ti manda mai due volte la stessa cosa.
+- **ogni 15 minuti** consegna i **promemoria** arrivati all'ora giusta e controlla se ci sono **notizie nuove** sul comune in cui ti trovi e **allerte nuove** nella tua regione. Non ti manda mai due volte la stessa cosa;
+- **alle 20** ti ricorda i **rifiuti** da portare fuori e, se hai attivato `/sera`, ti manda il riepilogo di domani.
 
 Ecco un riepilogo vero:
 
@@ -101,7 +122,10 @@ flowchart LR
 7. **Allerte** ([`allerte.py`](azdora/allerte.py)): l'API pubblica di **Meteoalarm**, per regione, dal livello giallo in su. In Emilia-Romagna il bot aggiunge il link ad Allerta Meteo Emilia-Romagna, che pubblica le allerte ufficiali.
 8. **Scadenze, spese e lista** ([`scadenze.py`](azdora/scadenze.py), [`spese.py`](azdora/spese.py), [`lista.py`](azdora/lista.py)): si scrivono come si parla. Il parser capisce date (`31/01`, `domani`), importi (`12,50€`, `1.234`) e ricorrenze in qualsiasi ordine ([`soldi.py`](azdora/soldi.py)). Gli importi sono tenuti in centesimi interi. Ogni chat ha i suoi dati, quindi il gruppo di coppia ha spese e lista di casa separate da quelle personali. I pulsanti sotto i messaggi aggiornano il messaggio stesso, senza riempire la chat.
 9. **Weekend** ([`weekend.py`](azdora/weekend.py)): un piccolo catalogo di gite a meno di un'ora da Riccione. Se il weekend è brutto propone quelle al coperto, e ogni settimana ne sceglie di diverse. Sagre ed eventi arrivano dagli articoli "Eventi" di Altarimini e da Google News, filtrati sulla Romagna.
-10. **cron-job.org** chiama [`api/cron.py`](api/cron.py) con un secondo segreto: alle 7 con `job=mattino` (il riepilogo), ogni 15 minuti con `job=controlli` (allerte e notizie nuove).
+10. **Frasi libere** ([`linguaggio.py`](azdora/linguaggio.py), [`promemoria.py`](azdora/promemoria.py)): regole scritte a mano, niente intelligenza artificiale, quindi gratis, istantanee e prevedibili. Una spesa è una frase con **un solo** importo e qualche parola, così "ci vediamo alle 8 e 30" non diventa una spesa. Per i promemoria vengono capiti "tra N minuti/ore/giorni", "oggi/domani/dopodomani/stasera/domattina", i giorni della settimana, le date e "alle 18.30".
+11. **Soldi** ([`budget.py`](azdora/budget.py), [`conti.py`](azdora/conti.py)): budget per categoria con soglie, e conti di gruppo calcolati sui saldi di ognuno con un algoritmo che riduce al minimo i passaggi di soldi. I centesimi avanzati vengono distribuiti in modo che i conti tornino sempre a zero.
+12. **Aria e carburante** ([`meteo/aria.py`](azdora/meteo/aria.py), [`carburante.py`](azdora/carburante.py)): l'API della qualità dell'aria di Open-Meteo (dati CAMS) e i due file aperti che il Ministero pubblica ogni mattina, cioè l'elenco dei distributori con le coordinate e i prezzi.
+13. **cron-job.org** chiama [`api/cron.py`](api/cron.py) con un secondo segreto: alle 7 con `job=mattino` (il riepilogo), ogni 15 minuti con `job=controlli` (promemoria, allerte, notizie e, alle 20, rifiuti e sera).
 
 ### Scelte di progetto
 
@@ -261,6 +285,12 @@ azdora-bot/
 │  ├─ soldi.py             # importi in centesimi, date e mesi all'italiana
 │  ├─ lista.py             # lista condivisa con le spunte
 │  ├─ weekend.py           # meteo del weekend, gite e sagre
+│  ├─ linguaggio.py        # spese scritte come si parla
+│  ├─ promemoria.py        # "ricordami domani alle 18 di…"
+│  ├─ budget.py            # budget mensile e avvisi
+│  ├─ conti.py             # spese divise nel gruppo
+│  ├─ rifiuti.py           # raccolta differenziata
+│  ├─ carburante.py        # distributori più economici (open data MIMIT)
 │  ├─ app.py               # monta i pezzi reali
 │  ├─ simula.py            # simulatore da terminale
 │  ├─ configura.py         # imposta webhook e menu comandi
@@ -269,6 +299,7 @@ azdora-bot/
 │     ├─ openmeteo.py      # client e modello dati di Open-Meteo
 │     ├─ vento.py          # rosa dei venti, nodi, Beaufort
 │     ├─ mare.py           # scala Douglas
+│     ├─ aria.py           # UV, qualità dell'aria, pollini
 │     └─ codici_wmo.py     # codici meteo → testo ed emoji
 ├─ tests/                  # pytest + respx, con risposte vere (meteo, feed, allerte) in fixtures/
 └─ .github/workflows/      # CI, "Configura bot", "Prova riepilogo"
@@ -282,12 +313,15 @@ azdora-bot/
 - [x] **Tappa 3: scadenze.** Bollo, assicurazione, revisione, bollette, con promemoria a 30, 7, 1 e 0 giorni e il pulsante "✅ Pagato".
 - [x] **Tappa 4: spese mensili.** `/spesa 45 benzina`, riepilogo per categoria, resoconto il 1° del mese, esportazione in CSV.
 - [x] **Tappa 5: chat di coppia.** Lista condivisa con le spunte, idee per il weekend: giri della domenica, sagre ed eventi in Romagna, con il meteo.
-- [ ] **Prossime idee**: carburante più economico in zona (open data MIMIT), UV e pollini, treni Riccione–Bologna, raccolta differenziata.
+- [x] **Più utile**: spese e promemoria scritti come si parla, categorie che imparano, budget, conti di coppia, raccolta differenziata, riepilogo della sera, UV e pollini, carburante più economico. Idee prese da bot open source come [MyDollarBot](https://github.com/mtkumar123/MyDollarBot), [SmartSpend2](https://github.com/CSC510-G35-Fall2022/SmartSpend2) e [Spliit](https://github.com/spliit-app/spliit), riscritte da zero.
+- [ ] **Prossime idee**: posizione inviata in automatico dal telefono (Comandi Rapidi / Tasker), treni Riccione–Bologna, grafico delle spese, foto dello scontrino.
 
 ## 🙏 Fonti dei dati
 
 - Meteo, mare e ricerca delle località: [Open-Meteo.com](https://open-meteo.com/), licenza [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 - Notizie: feed RSS pubblici dei giornali citati e Google News; i titoli rimandano sempre all'articolo originale.
+- Carburanti: open data del [Ministero delle Imprese e del Made in Italy](https://www.mimit.gov.it/it/open-data/elenco-dataset/carburanti-prezzi-praticati-e-anagrafica-degli-impianti), licenza IODL 2.0.
+- UV, qualità dell'aria e pollini: [Open-Meteo Air Quality](https://open-meteo.com/en/docs/air-quality-api) (dati Copernicus CAMS).
 - Allerte: [Meteoalarm](https://meteoalarm.org), licenza CC BY 4.0 (per l'Italia, dati del Servizio Meteorologico dell'Aeronautica Militare). Non sostituiscono le allerte ufficiali della [Protezione Civile](https://www.protezionecivile.gov.it) e di [Allerta Meteo Emilia-Romagna](https://allertameteo.regione.emilia-romagna.it/).
 - Nome del luogo dalla posizione: [Nominatim](https://nominatim.org/), dati © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, licenza ODbL.
 - I dati del mare si riferiscono a un punto al largo: sono indicativi per la costa.
@@ -307,7 +341,10 @@ azdora-bot/
   - location-aware local news with links (local RSS feeds and Google News) and Meteoalarm weather alerts, pushed every 15 minutes without repeats;
   - bill and car-tax reminders with a "Paid" button (recurring deadlines roll forward and become expenses);
   - monthly expenses with automatic categories, monthly reports and CSV export;
-  - a shared checklist for couples and weekend ideas (weather-aware day trips and local festivals).
+  - a shared checklist for couples and weekend ideas (weather-aware day trips and local festivals);
+  - plain-language input: "45 fuel" or "remind me tomorrow at 6pm to call the mechanic" (in Italian), with rule-based parsing and no paid AI;
+  - categories that learn from your corrections, monthly budgets with alerts, and Splitwise-style balances in group chats;
+  - waste-collection and evening reminders, UV/air quality/pollen, and the cheapest fuel nearby from Italian open data.
 - **Stack:**
   - Python 3.12 and `httpx`, calling the Telegram Bot API directly (no bot framework);
   - Telegram webhook served by Vercel serverless functions;
@@ -317,9 +354,9 @@ azdora-bot/
 - **Zero cost** on free tiers. Secrets live only in environment variables, never in the code.
 - **Quality:**
   - business logic is decoupled from infrastructure through small protocols;
-  - 430+ pytest tests, using real recorded API responses and respx HTTP mocks, including an end-to-end test of the Vercel handlers;
+  - 570+ pytest tests, using real recorded API responses and respx HTTP mocks, including an end-to-end test of the Vercel handlers;
   - ruff lint and format checks;
   - GitHub Actions CI.
-- **Next ideas:** cheapest fuel nearby (Italian open data), UV and pollen, train delays, waste-collection reminders.
+- **Next ideas:** automatic location from the phone, train delays, spending charts, receipt photos.
 
 Licensed under the [MIT License](LICENSE).

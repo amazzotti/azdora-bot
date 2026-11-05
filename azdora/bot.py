@@ -9,20 +9,29 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from html import escape
 from typing import Any
 
+import httpx
+
 from azdora import allerte as modulo_allerte
+from azdora import budget as modulo_budget
+from azdora import carburante as modulo_carburante
+from azdora import conti as modulo_conti
 from azdora import lista as modulo_lista
 from azdora import messaggi
 from azdora import notizie as modulo_notizie
+from azdora import promemoria as modulo_promemoria
+from azdora import rifiuti as modulo_rifiuti
 from azdora import scadenze as modulo_scadenze
 from azdora import spese as modulo_spese
 from azdora import weekend as modulo_weekend
 from azdora.allerte import FonteAllerte
 from azdora.archivio import Archivio, ArchivioMemoria, ErroreArchivio
+from azdora.budget import Budget, leggi_budget
+from azdora.carburante import CARBURANTI, FonteCarburante
 from azdora.config import (
     FUSO_ORARIO,
     LOCALITA,
@@ -31,8 +40,11 @@ from azdora.config import (
     Localita,
     trova_localita,
 )
+from azdora.conti import MembriGruppo, Pareggio, spese_da
+from azdora.linguaggio import leggi_spesa_libera
 from azdora.lista import Lista, leggi_voci
 from azdora.luoghi import CercaLuoghi, Luogo, distanza_km, localita_qui
+from azdora.meteo.aria import FonteAria, avvisi_aria, messaggio_aria
 from azdora.meteo.openmeteo import ErroreMeteo, FonteMeteo, PrevisioniMare
 from azdora.notizie import FonteNotizie, Notizia
 from azdora.posizione import (
@@ -43,12 +55,19 @@ from azdora.posizione import (
     Posizione,
     Zona,
 )
+from azdora.promemoria import (
+    ErrorePromemoria,
+    RegistroPromemoria,
+    e_un_promemoria,
+    leggi_promemoria,
+)
 from azdora.riepilogo import (
     DatiLocalita,
     riepilogo_domani,
     riepilogo_oggi,
     riepilogo_posizione,
 )
+from azdora.rifiuti import Calendario, leggi_rifiuti
 from azdora.scadenze import RegistroScadenze, leggi_scadenza
 from azdora.soldi import aggiungi_mesi, euro, leggi_mese
 from azdora.spese import RegistroSpese, leggi_spesa
@@ -77,6 +96,15 @@ COMANDI: tuple[tuple[str, str], ...] = (
     ("lista", "La lista condivisa delle cose da fare"),
     ("aggiungi", "Aggiungi alla lista: /aggiungi latte, pane"),
     ("weekend", "Meteo del weekend, gite e sagre"),
+    ("budget", "Budget mensile: /budget 800 o /budget auto 150"),
+    ("conti", "Nel gruppo: chi deve quanto a chi"),
+    ("pareggio", "Nel gruppo: siamo pari, si riparte da zero"),
+    ("promemoria", "I tuoi promemoria"),
+    ("ricordami", "Es. /ricordami domani alle 18 di chiamare"),
+    ("rifiuti", "Raccolta differenziata, avviso la sera prima"),
+    ("sera", "Riepilogo della sera alle 20: attiva o spegni"),
+    ("aria", "UV, qualità dell'aria e pollini"),
+    ("benzina", "Distributori più economici: /benzina gasolio"),
     ("dimentica", "Cancella la posizione che ricordo"),
     ("id", "Mostra l'id di questa chat"),
     ("aiuto", "Cosa so fare"),
@@ -95,6 +123,7 @@ MASSIMO_NOTIZIE_ZONA_NUOVA = 3
 NOTIZIE_A_RICHIESTA = 10  # con /notizie se ne vedono di più che negli avvisi automatici
 RICORDO_NOTIZIE_S = 3 * 24 * 3600
 RICORDO_ZONA_S = 30 * 24 * 3600
+ORA_DELLA_SERA = 20  # rifiuti e riepilogo della sera
 
 
 @dataclass(frozen=True)
@@ -113,6 +142,7 @@ class Comando:
     argomenti: tuple[str, ...]
     destinatario: str | None = None
     mittente: str = ""  # nome di chi scrive, utile nel gruppo
+    mittente_id: int | None = None
 
     @property
     def testo_argomenti(self) -> str:
@@ -145,6 +175,8 @@ class Azdora:
         archivio: Archivio | None = None,
         notizie: FonteNotizie | None = None,
         allerte: FonteAllerte | None = None,
+        aria: FonteAria | None = None,
+        carburante: FonteCarburante | None = None,
         orologio: Callable[[], datetime] = adesso_a_roma,
     ) -> None:
         self.impostazioni = impostazioni
@@ -155,6 +187,8 @@ class Azdora:
         self.posizioni = MemoriaPosizione(self.archivio)
         self.notizie = notizie
         self.allerte = allerte
+        self.aria = aria
+        self.carburante = carburante
         self.orologio = orologio
         # Previsioni già scaricate in questa richiesta: con più persone non si riscarica.
         self._cache_previsioni: dict[tuple[float, float], Any] = {}
@@ -185,6 +219,15 @@ class Azdora:
             "aggiungi": self._aggiungi,
             "svuota": self._svuota,
             "weekend": self._weekend,
+            "budget": self._budget,
+            "conti": self._conti,
+            "pareggio": self._pareggio,
+            "promemoria": self._promemoria,
+            "ricordami": self._ricordami,
+            "rifiuti": self._rifiuti,
+            "sera": self._sera,
+            "aria": self._aria,
+            "benzina": self._benzina,
         }
 
     # --- Ingresso ---------------------------------------------------------------------
@@ -229,13 +272,17 @@ class Azdora:
         if dati_chat.get("id") is None:
             return
         chat = Chat(dati_chat["id"], dati_chat.get("type", "private"))
-        comando = leggi_comando(messaggio.get("text"))
+        testo = (messaggio.get("text") or "").strip()
+        da = messaggio.get("from") or {}
+        mittente, mittente_id = da.get("first_name", ""), da.get("id")
+        comando = leggi_comando(testo)
         if comando is not None:
-            mittente = (messaggio.get("from") or {}).get("first_name", "")
-            comando = Comando(comando.nome, comando.argomenti, comando.destinatario, mittente)
+            comando = Comando(
+                comando.nome, comando.argomenti, comando.destinatario, mittente, mittente_id
+            )
         posizione = messaggio.get("location")
-        if comando is None and posizione is None:
-            return  # Testo libero: per ora l'Azdora risponde solo a comandi e posizioni.
+        if comando is None and posizione is None and not testo:
+            return
         if comando is not None and self._non_per_me(comando):
             return
 
@@ -243,7 +290,9 @@ class Azdora:
             self._chat_sconosciuta(chat, messaggio, comando)
             return
         if not chat.e_un_gruppo:
-            self._ricorda_nome(chat.id, (messaggio.get("from") or {}).get("first_name", ""))
+            self._ricorda_nome(chat.id, mittente)
+        elif mittente_id is not None:
+            self._ricorda_membro(chat.id, mittente_id, mittente)
 
         try:
             if posizione is not None:
@@ -254,6 +303,8 @@ class Azdora:
                     self.messaggero.invia_messaggio(chat.id, messaggi.COMANDO_SCONOSCIUTO)
                 else:
                     azione(chat, comando)
+            else:
+                self._testo_libero(chat, testo, mittente, mittente_id)
         except ErroreMeteo as errore:
             log.warning("Meteo non disponibile: %s", errore)
             self.messaggero.invia_messaggio(chat.id, messaggi.METEO_NON_DISPONIBILE)
@@ -558,6 +609,11 @@ class Azdora:
         avvisi = []
         if zona is not None and (testo := self._testo_allerte(zona, solo_se_ci_sono=True)):
             avvisi.append(testo)
+        aria = None
+        if zona is not None and self.aria is not None:
+            aria = self.aria.aria(localita_qui(zona.lat, zona.lon, zona.etichetta))
+        if aria is not None:
+            avvisi += avvisi_aria(aria)
         return riepilogo_oggi(self._dati_localita(zona), self.orologio(), nome, avvisi)
 
     def _zona_sicura(self, chat_id: int | None = None) -> Zona | None:
@@ -656,13 +712,32 @@ class Azdora:
             self.messaggero.invia_messaggio(chat.id, messaggi.USO_SPESA)
             return
         importo, descrizione = letta
+        self._registra_spesa(chat, importo, descrizione, comando.mittente, comando.mittente_id)
+
+    def _registra_spesa(
+        self, chat: Chat, importo: int, descrizione: str, chi: str, chi_id: int | None
+    ) -> None:
+        """Segna la spesa (nel gruppo anche chi l'ha pagata) e mostra i pulsanti."""
         registro = RegistroSpese(self.archivio, chat.id)
         oggi = self._oggi_data()
-        spesa = registro.aggiungi(oggi, importo, descrizione)
-        mese = modulo_spese.totale(registro.del_mese(oggi))
-        self.messaggero.invia_messaggio(
-            chat.id, messaggi.spesa_segnata(spesa.importo, spesa.categoria, descrizione, mese)
+        nel_gruppo = chat.e_un_gruppo
+        spesa = registro.aggiungi(
+            oggi,
+            importo,
+            descrizione,
+            chi=chi if nel_gruppo else "",
+            chi_id=chi_id if nel_gruppo else None,
         )
+        spese_mese = registro.del_mese(oggi)
+        testo = messaggi.spesa_segnata(
+            spesa.importo, spesa.categoria, descrizione, modulo_spese.totale(spese_mese)
+        )
+        if nel_gruppo and chi:
+            testo += f"\n💳 Pagata da {escape(chi)} · /conti per i conti di casa"
+        budget = Budget(self.archivio, chat.id).tutti()
+        if righe := modulo_budget.avviso_dopo_spesa(budget, spese_mese, spesa):
+            testo += f"\n{righe}"
+        self.messaggero.invia_messaggio(chat.id, testo, modulo_spese.pulsanti_spesa(spesa))
 
     def _spese(self, chat: Chat, comando: Comando) -> None:
         spese = RegistroSpese(self.archivio, chat.id).del_mese(self._oggi_data())
@@ -786,6 +861,19 @@ class Azdora:
                     chat_id, id_messaggio, *self._testo_scadenze(chat_id)
                 )
             return avviso
+        if azione in {"spcat", "spset", "spann"}:
+            return self._pulsante_spesa(chat_id, id_messaggio, azione, valore)
+        if azione == "prdel":
+            RegistroPromemoria(self.archivio, chat_id).elimina(int(valore))
+            if id_messaggio is not None:
+                voci = RegistroPromemoria(self.archivio, chat_id).tutti()
+                self.messaggero.modifica_messaggio(
+                    chat_id,
+                    id_messaggio,
+                    modulo_promemoria.elenco(voci, self.orologio()),
+                    modulo_promemoria.pulsanti(voci) or {"inline_keyboard": []},
+                )
+            return "🗑 Cancellato"
         if azione in {"voce", "lista"}:
             lista = Lista(self.archivio, chat_id)
             if azione == "voce":
@@ -894,9 +982,252 @@ class Azdora:
         return len(nuove)
 
     def controlli(self) -> None:
-        """Il giro di controlli periodico: allerte prima, poi notizie."""
-        for controllo in (self.controlla_allerte, self.controlla_notizie):
+        """Il giro di controlli periodico: promemoria, allerte, notizie e (alle 20) la sera."""
+        for controllo in (
+            self.controlla_promemoria,
+            self.controlla_allerte,
+            self.controlla_notizie,
+            self.controlla_sera,
+        ):
             try:
                 controllo()
             except (ErroreArchivio, ErroreMeteo) as errore:
                 log.warning("Controllo %s saltato: %s", controllo.__name__, errore)
+
+    # --- Messaggi liberi ---------------------------------------------------------------
+
+    def _testo_libero(self, chat: Chat, testo: str, chi: str, chi_id: int | None) -> None:
+        """Frasi senza comando: "45 benzina", "ricordami domani alle 18 di…".
+
+        Nei gruppi la gente chiacchiera: lì si capiscono solo le frasi che iniziano con
+        "spesa" o "ricordami", per non scambiare un messaggio qualsiasi per una spesa.
+        """
+        if e_un_promemoria(testo):
+            self._crea_promemoria(chat, testo)
+            return
+        frase = testo
+        if chat.e_un_gruppo:
+            minuscolo = testo.lower()
+            if not minuscolo.startswith(("spesa ", "+")):
+                return
+            frase = testo[1:] if testo.startswith("+") else testo[len("spesa ") :]
+        if (letta := leggi_spesa_libera(frase)) is not None:
+            self._registra_spesa(chat, *letta, chi, chi_id)
+        elif not chat.e_un_gruppo:
+            self.messaggero.invia_messaggio(chat.id, messaggi.NON_HO_CAPITO)
+
+    def _ricorda_membro(self, chat_id: int, utente_id: int, nome: str) -> None:
+        try:
+            MembriGruppo(self.archivio, chat_id).ricorda(utente_id, nome)
+        except ErroreArchivio as errore:
+            log.warning("Membro del gruppo non salvato: %s", errore)
+
+    # --- Spese: pulsanti, budget, conti -------------------------------------------------
+
+    def _pulsante_spesa(
+        self, chat_id: int, id_messaggio: int | None, azione: str, valore: str
+    ) -> str | None:
+        mese, id_spesa, indice = modulo_spese.leggi_riferimento(valore)
+        registro = RegistroSpese(self.archivio, chat_id)
+        spesa = registro.trova(mese, id_spesa)
+        if spesa is None:
+            return "Questa spesa non c'è più"
+        if azione == "spann":
+            registro.elimina(mese, id_spesa)
+            testo = messaggi.spesa_annullata(spesa.importo, spesa.descrizione)
+            tastiera: dict[str, Any] = {"inline_keyboard": []}
+            avviso = "↩️ Annullata"
+        elif azione == "spcat":
+            testo = messaggi.scegli_categoria(spesa.descrizione)
+            tastiera = modulo_spese.pulsanti_categorie(spesa)
+            avviso = None
+        else:
+            categorie = modulo_spese.TUTTE_LE_CATEGORIE
+            if indice is None or not 0 <= indice < len(categorie):
+                return None
+            cambiata = registro.cambia_categoria(mese, id_spesa, categorie[indice])
+            assert cambiata is not None
+            testo = messaggi.categoria_cambiata(
+                cambiata.importo, cambiata.categoria, cambiata.descrizione
+            )
+            tastiera = modulo_spese.pulsanti_spesa(cambiata)
+            avviso = f"🏷️ {cambiata.categoria}"
+        if id_messaggio is not None:
+            self.messaggero.modifica_messaggio(chat_id, id_messaggio, testo, tastiera)
+        return avviso
+
+    def _budget(self, chat: Chat, comando: Comando) -> None:
+        budget = Budget(self.archivio, chat.id)
+        if comando.argomenti:
+            letto = leggi_budget(comando.argomenti)
+            if letto is None:
+                self.messaggero.invia_messaggio(chat.id, modulo_budget.USO)
+                return
+            budget.imposta(*letto)
+        spese = RegistroSpese(self.archivio, chat.id).del_mese(self._oggi_data())
+        self.messaggero.invia_messaggio(chat.id, modulo_budget.stato(budget.tutti(), spese))
+
+    def _conti(self, chat: Chat, comando: Comando) -> None:
+        if not chat.e_un_gruppo:
+            self.messaggero.invia_messaggio(chat.id, messaggi.CONTI_SOLO_GRUPPO)
+            return
+        dal = Pareggio(self.archivio, chat.id).dal()
+        spese = spese_da(RegistroSpese(self.archivio, chat.id), dal, self._oggi_data())
+        membri = MembriGruppo(self.archivio, chat.id).tutti()
+        self.messaggero.invia_messaggio(chat.id, modulo_conti.resoconto(spese, membri, dal))
+
+    def _pareggio(self, chat: Chat, comando: Comando) -> None:
+        if not chat.e_un_gruppo:
+            self.messaggero.invia_messaggio(chat.id, messaggi.CONTI_SOLO_GRUPPO)
+            return
+        oggi = self._oggi_data()
+        Pareggio(self.archivio, chat.id).segna(oggi + timedelta(days=1))
+        self.messaggero.invia_messaggio(chat.id, messaggi.PAREGGIO)
+
+    # --- Promemoria, rifiuti, sera ---------------------------------------------------------
+
+    def _crea_promemoria(self, chat: Chat, frase: str) -> None:
+        adesso = self.orologio()
+        try:
+            quando, cosa = leggi_promemoria(frase, adesso)
+            nuovo = RegistroPromemoria(self.archivio, chat.id).aggiungi(quando, cosa)
+        except ErrorePromemoria as errore:
+            self.messaggero.invia_messaggio(chat.id, f"🤔 {errore}.\n\n{modulo_promemoria.USO}")
+            return
+        self.messaggero.invia_messaggio(chat.id, modulo_promemoria.conferma(nuovo, adesso))
+
+    def _ricordami(self, chat: Chat, comando: Comando) -> None:
+        if not comando.argomenti:
+            self.messaggero.invia_messaggio(chat.id, modulo_promemoria.USO)
+            return
+        self._crea_promemoria(chat, comando.testo_argomenti)
+
+    def _promemoria(self, chat: Chat, comando: Comando) -> None:
+        voci = RegistroPromemoria(self.archivio, chat.id).tutti()
+        self.messaggero.invia_messaggio(
+            chat.id,
+            modulo_promemoria.elenco(voci, self.orologio()),
+            modulo_promemoria.pulsanti(voci),
+        )
+
+    def _rifiuti(self, chat: Chat, comando: Comando) -> None:
+        calendario = Calendario(self.archivio, chat.id)
+        if comando.argomenti:
+            letto = leggi_rifiuti(comando.argomenti)
+            if letto is None:
+                self.messaggero.invia_messaggio(chat.id, modulo_rifiuti.USO)
+                return
+            calendario.imposta(*letto)
+        self.messaggero.invia_messaggio(
+            chat.id, modulo_rifiuti.messaggio_calendario(calendario.tutto())
+        )
+
+    def _sera_attiva(self, chat_id: int) -> bool:
+        return bool(self.archivio.leggi(f"sera-attiva:{chat_id}"))
+
+    def _sera(self, chat: Chat, comando: Comando) -> None:
+        scelta = comando.testo_argomenti.lower()
+        if scelta in {"on", "si", "sì", "attiva"}:
+            attiva = True
+        elif scelta in {"off", "no", "spegni", "basta"}:
+            attiva = False
+        else:
+            attiva = not self._sera_attiva(chat.id)
+        self.archivio.scrivi(f"sera-attiva:{chat.id}", attiva)
+        self.messaggero.invia_messaggio(chat.id, messaggi.sera_impostata(attiva))
+
+    def controlla_promemoria(self) -> int:
+        """Consegna i promemoria arrivati all'ora giusta, in tutte le chat."""
+        if not self._serve_memoria("Promemoria"):
+            return 0
+        adesso = self.orologio()
+        mandati = 0
+        for chat_id in sorted(self.impostazioni.chat_autorizzate):
+            try:
+                for voce in RegistroPromemoria(self.archivio, chat_id).scaduti(adesso):
+                    self.messaggero.invia_messaggio(chat_id, modulo_promemoria.avviso(voce))
+                    mandati += 1
+            except ErroreTelegram as errore:
+                log.warning("Promemoria non consegnato a %s: %s", chat_id, errore)
+        return mandati
+
+    def controlla_sera(self) -> int:
+        """Alle 20: rifiuti da portare fuori e, se attivo, il riepilogo di domani."""
+        adesso = self.orologio()
+        if adesso.hour != ORA_DELLA_SERA or not self._serve_memoria("Sera"):
+            return 0
+        domani = adesso.date() + timedelta(days=1)
+        mandati = 0
+        for chat_id in sorted(self.impostazioni.chat_autorizzate):
+            (nuova,) = self.archivio.segna_nuovi([f"sera:{chat_id}:{adesso.date()}"], 2 * 24 * 3600)
+            if not nuova:
+                continue
+            parti = []
+            if rifiuti := Calendario(self.archivio, chat_id).del_giorno(domani.weekday()):
+                parti.append(modulo_rifiuti.avviso_sera(rifiuti))
+            if self._sera_attiva(chat_id):
+                parti += self._parti_della_sera(chat_id, domani)
+            if not parti:
+                continue
+            try:
+                self.messaggero.invia_messaggio(chat_id, "\n\n".join(parti))
+                mandati += 1
+            except ErroreTelegram as errore:
+                log.warning("Sera non consegnata a %s: %s", chat_id, errore)
+        return mandati
+
+    def _parti_della_sera(self, chat_id: int, domani: date) -> list[str]:
+        parti = [f"🌙 <b>Buonasera{', ' + escape(n) if (n := self.nome_di(chat_id)) else ''}!</b>"]
+        zona = self._zona_sicura(chat_id if chat_id in self.impostazioni.persone else None)
+        try:
+            parti.append(riepilogo_domani(self._dati_localita(zona), domani))
+        except ErroreMeteo as errore:
+            log.warning("Meteo di domani non disponibile: %s", errore)
+        if voci := RegistroPromemoria(self.archivio, chat_id).del_giorno(domani):
+            parti.append(
+                "⏰ <b>Domani</b>\n"
+                + "\n".join(f"• {p.quando:%H:%M} {escape(p.testo)}" for p in voci)
+            )
+        scadenze = [s for s in RegistroScadenze(self.archivio, chat_id).tutte() if s.data == domani]
+        if scadenze:
+            parti.append(
+                "📅 <b>Scade domani</b>\n"
+                + "\n".join(f"• {escape(s.descrizione)}" for s in scadenze)
+            )
+        return parti
+
+    # --- Aria e carburante ----------------------------------------------------------------
+
+    def _aria(self, chat: Chat, comando: Comando) -> None:
+        if self.aria is None:
+            self.messaggero.invia_messaggio(chat.id, messaggi.ARIA_NON_DISPONIBILE)
+            return
+        if (localita := self._localita_richiesta(chat, comando)) is None:
+            return
+        aria = self.aria.aria(localita)
+        testo = messaggio_aria(aria, localita.nome) if aria else messaggi.ARIA_NON_DISPONIBILE
+        self.messaggero.invia_messaggio(chat.id, testo)
+
+    def _benzina(self, chat: Chat, comando: Comando) -> None:
+        if self.carburante is None:
+            self.messaggero.invia_messaggio(chat.id, messaggi.CARBURANTE_NON_DISPONIBILE)
+            return
+        argomenti = list(comando.argomenti)
+        tipo = "benzina"
+        if argomenti and argomenti[0].lower() in CARBURANTI:
+            tipo = argomenti.pop(0).lower()
+        richiesta = replace(comando, argomenti=tuple(argomenti))
+        if (localita := self._localita_richiesta(chat, richiesta)) is None:
+            return
+        carburante = CARBURANTI[tipo]
+        try:
+            offerte = self.carburante.offerte(
+                carburante, localita.lat, localita.lon, self.orologio()
+            )
+        except httpx.HTTPError as errore:
+            log.warning("Osservaprezzi non disponibile: %s", errore)
+            self.messaggero.invia_messaggio(chat.id, messaggi.CARBURANTE_NON_DISPONIBILE)
+            return
+        self.messaggero.invia_messaggio(
+            chat.id, modulo_carburante.messaggio(offerte, carburante, localita.nome)
+        )

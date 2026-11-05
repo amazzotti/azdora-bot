@@ -180,35 +180,34 @@ def mare_del_giorno(giorno: MareGiorno | None) -> str:
     return f"onde fino a {onde(giorno.altezza_max, giorno.direzione_dominante)}"
 
 
-AIUTO = """👋 <b>Ciao, sono l'Azdora!</b>
-Mando avanti la casa: tempo, notizie, scadenze, spese e cose da fare.
+AIUTO = """👋 <b>Ciao, sono l'Azdora!</b> Mando avanti la casa. Scrivimi come parli:
+• <i>45 benzina</i> o <i>ho speso 12,50 per la pizza</i> → segno la spesa
+• <i>ricordami domani alle 18 di chiamare il meccanico</i> → te lo ricordo
+• 📍 mandami la posizione → meteo, notizie e allerte di dove sei
 
 🌤️ <b>Meteo</b>
 /oggi · /domani – riepilogo con consigli
-/meteo · /vento · /mare – dove sei, o dove vuoi: <code>/vento cesenatico</code>
-/qui – mandami la posizione e ti dico che tempo fa lì 📍
+/meteo · /vento · /mare – dove sei o dove vuoi: <code>/vento cesenatico</code>
+/aria – UV, qualità dell'aria e pollini · /qui – manda la posizione
 
 🗞️ <b>Intorno a te</b>
-/notizie – ultime notizie della zona
-/allerte – allerte meteo della regione
+/notizie – le notizie di oggi, da Cesena a Pesaro
+/allerte – allerte meteo · /benzina – i distributori più economici
 /dove · /dimentica – la posizione che ricordo
 
-📅 <b>Scadenze</b>
-/scadenza 31/01 bollo auto 180€ annuale – segna una scadenza
-/scadenze – elenco, con ✅ Pagato
+💶 <b>Soldi</b>
+/mese · /spese · /esporta – riepiloghi e file per Excel
+/budget – quanto vuoi spendere al mese (anche per categoria)
+/scadenza · /scadenze – bollo, assicurazione… con ✅ Pagato
 
-💶 <b>Spese</b>
-/spesa 45 benzina – segna una spesa
-/mese · /spese · /annulla · /esporta
+🏠 <b>Casa e gruppo</b>
+/aggiungi latte, pane · /lista – la lista condivisa
+/conti · /pareggio – nel gruppo: chi deve quanto a chi
+/rifiuti – raccolta differenziata, avviso la sera prima
+/promemoria – i tuoi promemoria · /sera – riepilogo delle 20
+/weekend – meteo, gite e sagre
 
-📝 <b>Insieme</b>
-/aggiungi latte, pane · /lista · /svuota – la lista condivisa
-/weekend – meteo, gite della domenica e sagre
-
-Mandami la posizione (anche in tempo reale) e meteo, notizie e allerte seguono te,
-ovunque tu sia; se non so dove sei, uso casa (Riccione).
-Ogni mattina alle 7 ti mando il riepilogo ☕ con i promemoria.
-/id – l'id di questa chat"""
+Ogni mattina alle 7 ti mando il riepilogo ☕. /id – l'id di questa chat"""
 
 CREDITI_OSM = '<i>Luogo: © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a></i>'
 
@@ -319,7 +318,7 @@ USO_AGGIUNGI = "📝 Scrivi cosa aggiungere, separato da virgole: <code>/aggiung
 def spesa_segnata(importo: int, categoria: str, descrizione: str, totale_mese: int) -> str:
     return (
         f"✅ Segnata: <b>{euro(importo)}</b> · {escape(categoria)} · {escape(descrizione)}\n"
-        f"Questo mese: {euro(totale_mese)} · /annulla se ho sbagliato"
+        f"Questo mese: {euro(totale_mese)}"
     )
 
 
@@ -327,3 +326,46 @@ def lista_svuotata(quante: int) -> str:
     if quante == 0:
         return "📝 Non c'era niente di spuntato da togliere."
     return f"🧹 Tolte {quante} cose fatte dalla lista."
+
+
+# --- Migliorie: spese libere, conti, sera, aria, carburante --------------------------------
+
+NON_HO_CAPITO = (
+    "🤔 Non ho capito. Puoi scrivermi come parli:\n"
+    "• <i>45 benzina</i> oppure <i>ho speso 12,50 per la pizza</i> → segno una spesa\n"
+    "• <i>ricordami domani alle 18 di chiamare il meccanico</i> → promemoria\n"
+    "Oppure usa un comando: /aiuto li elenca tutti."
+)
+CONTI_SOLO_GRUPPO = (
+    "🤝 I conti si fanno nel gruppo: lì ogni spesa ricorda chi l'ha pagata. "
+    "Scrivete <code>/spesa 60 spesa conad</code> e poi /conti."
+)
+PAREGGIO = "🤝 Fatto: siete pari! Da domani i conti ripartono da zero."
+ARIA_NON_DISPONIBILE = "😓 Il servizio della qualità dell'aria non risponde. Riprova tra poco."
+CARBURANTE_NON_DISPONIBILE = (
+    "😓 Il sito dei prezzi dei carburanti del Ministero non risponde. Riprova tra poco."
+)
+
+
+def spesa_annullata(importo: int, descrizione: str) -> str:
+    return f"↩️ Annullata: <s>{euro(importo)} · {escape(descrizione)}</s>"
+
+
+def scegli_categoria(descrizione: str) -> str:
+    return f"🏷️ In che categoria metto <b>{escape(descrizione)}</b>?"
+
+
+def categoria_cambiata(importo: int, categoria: str, descrizione: str) -> str:
+    return (
+        f"✅ {euro(importo)} · {escape(descrizione)} → <b>{escape(categoria)}</b>\n"
+        "La prossima volta lo metto lì da solo."
+    )
+
+
+def sera_impostata(attiva: bool) -> str:
+    if attiva:
+        return (
+            "🌙 Riepilogo della sera <b>attivo</b>: alle 20 ti mando il meteo di domani, "
+            "i promemoria e le scadenze del giorno dopo. /sera per spegnerlo."
+        )
+    return "🌙 Riepilogo della sera <b>spento</b>. I rifiuti te li ricordo comunque."

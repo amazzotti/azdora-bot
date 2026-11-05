@@ -9,8 +9,10 @@ import httpx
 from azdora.allerte import Meteoalarm
 from azdora.archivio import Archivio, ArchivioMemoria, ArchivioUpstash
 from azdora.bot import Azdora
+from azdora.carburante import Osservaprezzi
 from azdora.config import Impostazioni
 from azdora.luoghi import Luoghi
+from azdora.meteo.aria import OpenMeteoAria
 from azdora.meteo.openmeteo import OpenMeteo
 from azdora.notizie import LettoreNotizie
 from azdora.telegram import Telegram
@@ -46,4 +48,6 @@ def crea_azdora(impostazioni: Impostazioni, http: httpx.Client) -> Azdora:
         archivio=crea_archivio(impostazioni, http),
         notizie=LettoreNotizie(http),
         allerte=Meteoalarm(http),
+        aria=OpenMeteoAria(http),
+        carburante=Osservaprezzi(http),
     )

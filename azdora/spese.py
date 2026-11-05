@@ -10,8 +10,8 @@ import csv
 import io
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
-from dataclasses import asdict, dataclass
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import asdict, dataclass, replace
 from datetime import date
 from html import escape
 from typing import Any
@@ -117,8 +117,64 @@ CATEGORIE: dict[str, tuple[str, ...]] = {
 ALTRO = "📦 Altro"
 
 
-def categoria_per(descrizione: str) -> str:
-    """Indovina la categoria dalla descrizione (``"benzina"`` → ``"🚗 Auto"``)."""
+TUTTE_LE_CATEGORIE: tuple[str, ...] = (*CATEGORIE, ALTRO)
+
+# Parole che non dicono niente sulla categoria ("la pizza" → "pizza").
+_PAROLE_VUOTE = frozenset(
+    {
+        "il",
+        "lo",
+        "la",
+        "i",
+        "gli",
+        "le",
+        "un",
+        "uno",
+        "una",
+        "di",
+        "da",
+        "del",
+        "della",
+        "dei",
+        "al",
+        "alla",
+        "allo",
+        "ai",
+        "per",
+        "con",
+        "su",
+        "in",
+        "e",
+        "a",
+    }
+)
+
+
+def parola_chiave(descrizione: str) -> str:
+    """La prima parola che conta: ``"la spesa all'Esselunga"`` → ``"spesa"``."""
+    parole = [p for p in re.findall(r"\w+", descrizione.lower()) if p not in _PAROLE_VUOTE]
+    return parole[0] if parole else ""
+
+
+def trova_categoria(nome: str) -> str | None:
+    """``"auto"``, ``"Bollette"``, ``"fuori"`` → la categoria completa con l'emoji."""
+    cercato = nome.strip().lower()
+    if len(cercato) < 3:
+        return None
+    for categoria in TUTTE_LE_CATEGORIE:
+        if categoria.split(" ", 1)[1].lower().startswith(cercato):
+            return categoria
+    return None
+
+
+def categoria_per(descrizione: str, apprese: Mapping[str, str] | None = None) -> str:
+    """Indovina la categoria (``"benzina"`` → ``"🚗 Auto"``).
+
+    Prima guarda le correzioni fatte da te in passato (``apprese``), poi le parole note.
+    """
+    chiave = parola_chiave(descrizione)
+    if apprese and chiave in apprese:
+        return apprese[chiave]
     parole = re.findall(r"\w+", descrizione.lower())
     for categoria, radici in CATEGORIE.items():
         if any(parola.startswith(radice) for parola in parole for radice in radici):
@@ -133,6 +189,8 @@ class Spesa:
     importo: int  # centesimi
     categoria: str
     descrizione: str
+    chi: str = ""  # nel gruppo: chi ha pagato
+    chi_id: int | None = None
 
     def in_dizionario(self) -> dict[str, Any]:
         return {**asdict(self), "data": self.data.isoformat()}
@@ -168,18 +226,57 @@ class RegistroSpese:
         self._archivio.scrivi(self._chiave(mese_chiave(giorno)), [s.in_dizionario() for s in spese])
 
     def aggiungi(
-        self, giorno: date, importo: int, descrizione: str, categoria: str | None = None
+        self,
+        giorno: date,
+        importo: int,
+        descrizione: str,
+        categoria: str | None = None,
+        *,
+        chi: str = "",
+        chi_id: int | None = None,
     ) -> Spesa:
         spese = self.del_mese(giorno)
         nuova = Spesa(
             id=max((s.id for s in spese), default=0) + 1,
             data=giorno,
             importo=importo,
-            categoria=categoria or categoria_per(descrizione),
+            categoria=categoria or categoria_per(descrizione, self.apprese()),
             descrizione=descrizione,
+            chi=chi,
+            chi_id=chi_id,
         )
         self._salva(giorno, [*spese, nuova])
         return nuova
+
+    def trova(self, giorno: date, id_spesa: int) -> Spesa | None:
+        return next((s for s in self.del_mese(giorno) if s.id == id_spesa), None)
+
+    def elimina(self, giorno: date, id_spesa: int) -> Spesa | None:
+        spese = self.del_mese(giorno)
+        trovata = next((s for s in spese if s.id == id_spesa), None)
+        if trovata is not None:
+            self._salva(giorno, [s for s in spese if s.id != id_spesa])
+        return trovata
+
+    def cambia_categoria(self, giorno: date, id_spesa: int, categoria: str) -> Spesa | None:
+        """Corregge la categoria e se la ricorda per le prossime spese simili."""
+        spese = self.del_mese(giorno)
+        trovata = next((s for s in spese if s.id == id_spesa), None)
+        if trovata is None:
+            return None
+        cambiata = replace(trovata, categoria=categoria)
+        self._salva(giorno, [cambiata if s.id == id_spesa else s for s in spese])
+        if chiave := parola_chiave(trovata.descrizione):
+            self._archivio.scrivi(self._chiave_apprese, {**self.apprese(), chiave: categoria})
+        return cambiata
+
+    @property
+    def _chiave_apprese(self) -> str:
+        return f"categorie:{self._chat_id}"
+
+    def apprese(self) -> dict[str, str]:
+        """Le categorie che hai corretto tu: parola → categoria."""
+        return self._archivio.leggi(self._chiave_apprese) or {}
 
     def annulla_ultima(self, giorno: date) -> Spesa | None:
         spese = self.del_mese(giorno)
@@ -265,3 +362,33 @@ def csv_spese(spese: Iterable[Spesa]) -> bytes:
         scrittore.writerow([s.data.strftime("%d/%m/%Y"), importo, categoria, s.descrizione])
     # BOM iniziale: così Excel riconosce l'UTF-8 e gli accenti.
     return ("﻿" + buffer.getvalue()).encode("utf-8")
+
+
+def pulsanti_spesa(spesa: Spesa) -> dict[str, Any]:
+    """Sotto ogni spesa segnata: cambia categoria o annulla."""
+    rif = f"{mese_chiave(spesa.data)}:{spesa.id}"
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "🏷️ Cambia categoria", "callback_data": f"spcat:{rif}"},
+                {"text": "↩️ Annulla", "callback_data": f"spann:{rif}"},
+            ]
+        ]
+    }
+
+
+def pulsanti_categorie(spesa: Spesa) -> dict[str, Any]:
+    """Tutte le categorie, due per riga, per correggere una spesa."""
+    rif = f"{mese_chiave(spesa.data)}:{spesa.id}"
+    tasti = [
+        {"text": c, "callback_data": f"spset:{rif}:{i}"} for i, c in enumerate(TUTTE_LE_CATEGORIE)
+    ]
+    return {"inline_keyboard": [tasti[i : i + 2] for i in range(0, len(tasti), 2)]}
+
+
+def leggi_riferimento(valore: str) -> tuple[date, int, int | None]:
+    """``"2026-11:3"`` o ``"2026-11:3:5"`` → (1° del mese, id spesa, indice categoria)."""
+    parti = valore.split(":")
+    anno, mese = (int(x) for x in parti[0].split("-"))
+    indice = int(parti[2]) if len(parti) > 2 else None
+    return date(anno, mese, 1), int(parti[1]), indice

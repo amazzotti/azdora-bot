@@ -31,8 +31,10 @@ from azdora.allerte import Allerta, Meteoalarm, leggi_allerte
 from azdora.app import nuovo_client_http
 from azdora.archivio import ArchivioMemoria
 from azdora.bot import Azdora
+from azdora.carburante import Osservaprezzi
 from azdora.config import FUSO_ORARIO, Impostazioni, Localita
 from azdora.luoghi import Luoghi, Luogo, leggi_luogo_inverso, leggi_ricerca
+from azdora.meteo.aria import OpenMeteoAria
 from azdora.meteo.openmeteo import (
     FonteMeteo,
     OpenMeteo,
@@ -239,6 +241,8 @@ def main(argomenti: list[str] | None = None) -> int:
                 archivio=archivio,
                 notizie=LettoreNotizie(http),
                 allerte=Meteoalarm(http),
+                aria=OpenMeteoAria(http),
+                carburante=Osservaprezzi(http),
             )
 
         for testo in scelte.messaggi:
