@@ -211,8 +211,15 @@ class LettoreNotizie:
     def __init__(self, http: httpx.Client, fonti_riviera: Sequence[Fonte] = FONTI_RIVIERA):
         self._http = http
         self._fonti_riviera = fonti_riviera
+        # Durante un giro di controlli per più persone ogni feed si scarica una volta sola.
+        self._gia_scaricati: dict[str, list[Notizia]] = {}
 
     def _scarica(self, fonte: Fonte) -> list[Notizia]:
+        if fonte.url not in self._gia_scaricati:
+            self._gia_scaricati[fonte.url] = self._scarica_davvero(fonte)
+        return self._gia_scaricati[fonte.url]
+
+    def _scarica_davvero(self, fonte: Fonte) -> list[Notizia]:
         try:
             risposta = self._http.get(fonte.url, follow_redirects=True)
             risposta.raise_for_status()

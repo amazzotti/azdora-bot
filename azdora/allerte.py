@@ -182,9 +182,17 @@ class FonteAllerte(Protocol):
 class Meteoalarm:
     def __init__(self, http: httpx.Client) -> None:
         self._http = http
+        self._gia_scaricate: dict[str, list[Allerta]] = {}
 
     def allerte(self, paese: str) -> list[Allerta]:
-        feed = FEED_PER_PAESE.get(paese.lower())
+        """Allerte del paese; scaricate una volta sola per giro di controlli."""
+        chiave = paese.lower()
+        if chiave not in self._gia_scaricate:
+            self._gia_scaricate[chiave] = self._scarica(chiave)
+        return self._gia_scaricate[chiave]
+
+    def _scarica(self, paese: str) -> list[Allerta]:
+        feed = FEED_PER_PAESE.get(paese)
         if feed is None:
             return []
         try:

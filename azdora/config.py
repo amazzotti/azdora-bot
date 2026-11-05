@@ -7,6 +7,7 @@ Nessun segreto è scritto nel codice: token e chiavi arrivano solo da ``os.envir
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo
@@ -82,6 +83,17 @@ def _leggi_chat_id(env: Mapping[str, str], nome: str) -> int | None:
         raise ConfigurazioneErrata(f"{nome} deve essere un numero, non {valore!r}") from errore
 
 
+def _leggi_lista_chat(env: Mapping[str, str], nome: str) -> tuple[int, ...]:
+    """``"123, 456"`` → (123, 456). Separatori ammessi: virgola, punto e virgola, spazi."""
+    valori = [v for v in re.split(r"[,;\s]+", env.get(nome, "").strip()) if v]
+    try:
+        return tuple(dict.fromkeys(int(v) for v in valori))
+    except ValueError as errore:
+        raise ConfigurazioneErrata(
+            f"{nome} deve contenere numeri separati da virgola, non {env.get(nome)!r}"
+        ) from errore
+
+
 @dataclass(frozen=True)
 class Impostazioni:
     """Tutto quello che il bot legge dall'ambiente."""
@@ -89,6 +101,8 @@ class Impostazioni:
     token: str
     chat_personale: int | None = None
     chat_coppia: int | None = None
+    # Chat private di familiari (babbo, fidanzata…): ognuno ha i suoi dati e il suo riepilogo.
+    chat_famiglia: tuple[int, ...] = ()
     segreto_webhook: str = ""
     segreto_cron: str = ""
     username_bot: str = ""
@@ -104,6 +118,7 @@ class Impostazioni:
             token=env.get("TELEGRAM_BOT_TOKEN", "").strip(),
             chat_personale=_leggi_chat_id(env, "TELEGRAM_CHAT_ID"),
             chat_coppia=_leggi_chat_id(env, "TELEGRAM_CHAT_ID_COPPIA"),
+            chat_famiglia=_leggi_lista_chat(env, "TELEGRAM_CHAT_ID_FAMIGLIA"),
             segreto_webhook=env.get("TELEGRAM_WEBHOOK_SECRET", "").strip(),
             segreto_cron=env.get("CRON_SECRET", "").strip(),
             username_bot=env.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@"),
@@ -118,9 +133,15 @@ class Impostazioni:
         )
 
     @property
+    def persone(self) -> tuple[int, ...]:
+        """Le chat private servite: prima la tua, poi quelle della famiglia."""
+        tutte = (self.chat_personale, *self.chat_famiglia)
+        return tuple(dict.fromkeys(c for c in tutte if c is not None))
+
+    @property
     def chat_autorizzate(self) -> frozenset[int]:
-        """Le uniche chat a cui il bot risponde: la tua privata e il gruppo di coppia."""
-        return frozenset(c for c in (self.chat_personale, self.chat_coppia) if c is not None)
+        """Le uniche chat a cui il bot risponde: le chat private della famiglia e il gruppo."""
+        return frozenset((*self.persone, *((self.chat_coppia,) if self.chat_coppia else ())))
 
     def richiedi_token(self) -> str:
         if not self.token:

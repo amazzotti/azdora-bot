@@ -11,6 +11,7 @@ In Romagna l'*azdora* è chi manda avanti la casa: sa che tempo fa, si ricorda l
 
 - 📍 **Dove sei tu.** Mandagli la posizione, anche quella in tempo reale. Meteo, vento, mare, notizie e allerte riguardano il comune e la regione in cui ti trovi: Misano, Bologna, la montagna o una gita all'estero.
 - 🔎 **Dove vuoi tu.** `/meteo cesenatico`, `/vento san marino`, `/notizie bologna`: qualsiasi comune, cercato per nome.
+- 👨‍👩‍👧 **Per tutta la famiglia.** Babbo, fidanzata e chi vuoi possono avere la loro chat privata con il bot, ognuno con i suoi dati e il suo riepilogo delle 7.
 - 🏠 **Casa in Riviera.** Se non sa dove sei, usa casa: Riccione e Rimini, con i giornali locali e i venti dell'Adriatico chiamati per nome.
 
 > 🇬🇧 English summary at the [bottom of the page](#-english-summary).
@@ -117,7 +118,8 @@ flowchart LR
 - **Nessun segreto nel codice.** Token e chiavi vivono solo nelle variabili d'ambiente di Vercel e nei GitHub Secrets. Il file `.env` è escluso da git.
 - **Webhook protetto**: le richieste senza l'header `X-Telegram-Bot-Api-Secret-Token` giusto ricevono `401`. Il confronto è a tempo costante.
 - **Cron protetto**: serve `Authorization: Bearer <CRON_SECRET>`.
-- **Il bot risponde solo a due chat**: la tua chat privata e il gruppo di coppia. Agli sconosciuti dice solo il loro `/id`. Se un estraneo lo aggiunge a un gruppo, il bot esce da solo.
+- **Il bot risponde solo alle chat che autorizzi tu**: la tua chat privata, quelle dei familiari e il gruppo di coppia. Agli sconosciuti dice solo il loro `/id`. Solo tu puoi aggiungerlo a un gruppo: se lo fa un altro, il bot esce da solo.
+- **Ogni chat ha i suoi dati.** Scadenze, spese, lista e posizione di una persona non si mescolano con quelle delle altre. Il database Upstash però è tuo: avvisa i familiari che tecnicamente potresti vederli.
 - **Scadenze, spese e lista** stanno solo nel tuo database Upstash, mai nel repository.
 - **Posizione**: la salva solo se gliela mandi tu, nel tuo database Upstash, e la cancella da sola dopo 30 giorni (per notizie e allerte conta solo quella degli ultimi 3). Con `/dimentica` la cancelli subito. Le coordinate vanno a Open-Meteo e Nominatim solo per chiedere meteo e nome del luogo.
 - **Nei log non finisce il token**: gli errori di rete vengono riformulati senza l'URL, che lo contiene.
@@ -151,6 +153,8 @@ Lancialo due volte: un segreto serve per `TELEGRAM_WEBHOOK_SECRET`, l'altro per 
    | `AZDORA_NOME` | come vuoi essere salutato, es. `Ale` |
    | `UPSTASH_REDIS_REST_URL` | dal punto 6 (si possono aggiungere anche dopo) |
    | `UPSTASH_REDIS_REST_TOKEN` | dal punto 6 |
+   | `TELEGRAM_CHAT_ID_FAMIGLIA` | facoltativa: id dei familiari separati da virgola (punto 7) |
+   | `TELEGRAM_CHAT_ID_COPPIA` | facoltativa: id del gruppo di coppia (punto 8) |
 
 4. Clicca **Deploy**. Per controllare, apri `https://<progetto>.vercel.app/api/webhook`: deve rispondere `{"ok": true, ...}`.
 
@@ -184,7 +188,13 @@ Per provare il riepilogo senza cron-job.org c'è anche il workflow **Actions →
 
 Senza Upstash meteo, notizie e weekend funzionano lo stesso. Scadenze, spese e lista invece hanno bisogno della memoria, e i controlli automatici non mandano nulla per non ripeterti ogni volta le stesse notizie.
 
-### 7. Il gruppo di coppia (facoltativo)
+### 7. La famiglia (facoltativo)
+Per dare il bot a tuo babbo, alla tua ragazza o a chi vuoi, ognuno nella sua chat privata:
+1. Ognuno apre il bot su Telegram (ad esempio `t.me/azdora_riccione_bot`), preme **Avvia** e scrive `/id`. Il bot gli risponde con un numero.
+2. Su Vercel metti tutti quei numeri, separati da virgola, in `TELEGRAM_CHAT_ID_FAMIGLIA` (ad esempio `123456789,987654321`) e fai **Redeploy**.
+3. Fatto: ognuno ha le sue scadenze, spese, lista e posizione, e riceve il suo riepilogo delle 7 con il suo nome e il meteo, le notizie e le allerte di dove si trova. Il meteo si scarica una volta sola per tutti, quindi i costi restano a zero.
+
+### 8. Il gruppo di coppia (facoltativo)
 1. Crea un gruppo Telegram con la tua ragazza e aggiungi il bot: siccome lo aggiungi tu, resta e ti scrive l'id del gruppo (un numero negativo).
 2. Metti quel numero in `TELEGRAM_CHAT_ID_COPPIA` su Vercel e fai **Redeploy**.
 3. Su @BotFather manda `/setjoingroups`, scegli il bot e poi **Disable**: nessun altro potrà più aggiungerlo a un gruppo.

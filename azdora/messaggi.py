@@ -237,9 +237,10 @@ def messaggio_id(chat_id: int, autorizzata: bool) -> str:
     righe = [f"🆔 L'id di questa chat è <code>{chat_id}</code>"]
     if not autorizzata:
         righe.append(
-            "Questa chat non è ancora autorizzata: metti questo numero in "
-            "<code>TELEGRAM_CHAT_ID</code> (chat privata) o "
-            "<code>TELEGRAM_CHAT_ID_COPPIA</code> (gruppo) su Vercel."
+            "Questa chat non è ancora autorizzata: manda questo numero a chi gestisce il bot.\n"
+            "Per chi lo gestisce, su Vercel: <code>TELEGRAM_CHAT_ID</code> (la tua chat), "
+            "<code>TELEGRAM_CHAT_ID_FAMIGLIA</code> (chat di un familiare, numeri separati da "
+            "virgola) o <code>TELEGRAM_CHAT_ID_COPPIA</code> (gruppo)."
         )
     return "\n".join(righe)
 

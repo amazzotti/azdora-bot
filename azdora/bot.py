@@ -52,7 +52,7 @@ from azdora.riepilogo import (
 from azdora.scadenze import RegistroScadenze, leggi_scadenza
 from azdora.soldi import aggiungi_mesi, euro, leggi_mese
 from azdora.spese import RegistroSpese, leggi_spesa
-from azdora.telegram import Messaggero
+from azdora.telegram import ErroreTelegram, Messaggero
 
 log = logging.getLogger(__name__)
 
@@ -155,6 +155,9 @@ class Azdora:
         self.notizie = notizie
         self.allerte = allerte
         self.orologio = orologio
+        # Previsioni già scaricate in questa richiesta: con più persone non si riscarica.
+        self._cache_previsioni: dict[tuple[float, float], Any] = {}
+        self._cache_mare: dict[tuple[float, float], PrevisioniMare | None] = {}
         self._azioni: dict[str, Callable[[Chat, Comando], None]] = {
             "start": self._aiuto,
             "aiuto": self._aiuto,
@@ -238,6 +241,8 @@ class Azdora:
         if not self._e_autorizzata(chat.id):
             self._chat_sconosciuta(chat, messaggio, comando)
             return
+        if not chat.e_un_gruppo:
+            self._ricorda_nome(chat.id, (messaggio.get("from") or {}).get("first_name", ""))
 
         try:
             if posizione is not None:
@@ -278,7 +283,7 @@ class Azdora:
         """Dove si trova chi scrive: la posizione della chat, poi quella del padrone, poi casa."""
         try:
             zona = self.posizioni.zona(chat.id, self.orologio())
-            if not zona.da_posizione and chat.id != self.impostazioni.chat_personale:
+            if not zona.da_posizione and chat.e_un_gruppo:
                 zona = self.zona()
         except ErroreArchivio as errore:
             log.warning("Zona non disponibile, uso casa: %s", errore)
@@ -303,6 +308,12 @@ class Azdora:
 
     def _mare_vicino(self, localita: Localita) -> PrevisioniMare | None:
         """Il mare davanti alla località, o ``None`` se è nell'entroterra o non disponibile."""
+        chiave = (localita.mare_lat, localita.mare_lon)
+        if chiave not in self._cache_mare:
+            self._cache_mare[chiave] = self._mare_da_scaricare(localita)
+        return self._cache_mare[chiave]
+
+    def _mare_da_scaricare(self, localita: Localita) -> PrevisioniMare | None:
         try:
             mare = self.meteo.mare(localita)
         except ErroreMeteo as errore:
@@ -377,9 +388,28 @@ class Azdora:
         except ErroreArchivio as errore:
             log.warning("Posizione in tempo reale non salvata: %s", errore)
 
-    def zona(self) -> Zona:
-        """La zona attuale del padrone: dove si trova, o casa."""
-        return self.posizioni.zona(self.impostazioni.chat_personale, self.orologio())
+    def zona(self, chat_id: int | None = None) -> Zona:
+        """La zona attuale di una persona (di default il padrone): dove si trova, o casa."""
+        chi = chat_id if chat_id is not None else self.impostazioni.chat_personale
+        return self.posizioni.zona(chi, self.orologio())
+
+    def _ricorda_nome(self, chat_id: int, nome: str) -> None:
+        """Il nome di Telegram dei familiari, per il "Buongiorno" delle 7."""
+        if not nome or chat_id == self.impostazioni.chat_personale:
+            return
+        try:
+            if self.archivio.leggi(f"nome:{chat_id}") != nome:
+                self.archivio.scrivi(f"nome:{chat_id}", nome)
+        except ErroreArchivio as errore:
+            log.warning("Nome non salvato: %s", errore)
+
+    def nome_di(self, chat_id: int) -> str:
+        if chat_id == self.impostazioni.chat_personale:
+            return self.impostazioni.nome_utente
+        try:
+            return self.archivio.leggi(f"nome:{chat_id}") or ""
+        except ErroreArchivio:
+            return ""
 
     # --- Comandi ----------------------------------------------------------------------
 
@@ -463,7 +493,7 @@ class Azdora:
         self.messaggero.invia_messaggio(chat.id, testo)
 
     def _allerte(self, chat: Chat, comando: Comando) -> None:
-        zona = self.zona()
+        zona = self._zona_della_chat(chat)
         self.messaggero.invia_messaggio(chat.id, self._testo_allerte(zona, solo_se_ci_sono=False))
 
     def _testo_allerte(self, zona: Zona, solo_se_ci_sono: bool) -> str:
@@ -493,9 +523,15 @@ class Azdora:
         if zona is not None and zona.da_posizione and self._lontano_da_casa(zona):
             luoghi.insert(0, localita_qui(zona.lat, zona.lon, zona.etichetta))
         return [
-            DatiLocalita(self.meteo.previsioni(localita), self._mare_vicino(localita))
+            DatiLocalita(self._previsioni(localita), self._mare_vicino(localita))
             for localita in luoghi
         ]
+
+    def _previsioni(self, localita: Localita) -> Any:
+        chiave = (localita.lat, localita.lon)
+        if chiave not in self._cache_previsioni:
+            self._cache_previsioni[chiave] = self.meteo.previsioni(localita)
+        return self._cache_previsioni[chiave]
 
     @staticmethod
     def _lontano_da_casa(zona: Zona) -> bool:
@@ -504,37 +540,47 @@ class Azdora:
             for casa in LOCALITA
         )
 
-    def testo_oggi(self, saluta: bool, zona: Zona | None = None) -> str:
-        nome = self.impostazioni.nome_utente if saluta else ""
+    def testo_oggi(self, saluta: bool, zona: Zona | None = None, nome: str | None = None) -> str:
+        if nome is None:
+            nome = self.impostazioni.nome_utente if saluta else ""
         zona = zona if zona is not None else self._zona_sicura()
         avvisi = []
         if zona is not None and (testo := self._testo_allerte(zona, solo_se_ci_sono=True)):
             avvisi.append(testo)
         return riepilogo_oggi(self._dati_localita(zona), self.orologio(), nome, avvisi)
 
-    def _zona_sicura(self) -> Zona | None:
+    def _zona_sicura(self, chat_id: int | None = None) -> Zona | None:
         """La zona, ma senza far fallire il riepilogo se l'archivio non risponde."""
         try:
-            return self.zona()
+            return self.zona(chat_id)
         except ErroreArchivio as errore:
             log.warning("Zona non disponibile: %s", errore)
             return None
 
     def invia_riepilogo_mattutino(self) -> None:
-        """Il messaggio delle 7: meteo, poi promemoria delle scadenze e (il 1°) le spese."""
-        chat_id = self._chat_personale()
-        try:
-            testo = self.testo_oggi(saluta=True)
-        except ErroreMeteo as errore:
-            log.error("Riepilogo mattutino senza meteo: %s", errore)
-            testo = messaggi.METEO_NON_DISPONIBILE
-        self.messaggero.invia_messaggio(chat_id, testo)
+        """Il messaggio delle 7, a ogni persona con il suo nome e la sua zona;
+        poi promemoria delle scadenze e (il 1°) il resoconto delle spese."""
+        for chat_id in self._persone():
+            try:
+                testo = self.testo_oggi(
+                    saluta=True,
+                    zona=self._zona_sicura(chat_id),
+                    nome=self.nome_di(chat_id),
+                )
+            except ErroreMeteo as errore:
+                log.error("Riepilogo mattutino senza meteo: %s", errore)
+                testo = messaggi.METEO_NON_DISPONIBILE
+            try:
+                self.messaggero.invia_messaggio(chat_id, testo)
+            except ErroreTelegram as errore:
+                # Es. un familiare ha bloccato il bot: gli altri lo ricevono lo stesso.
+                log.warning("Riepilogo non consegnato a %s: %s", chat_id, errore)
         for chat in sorted(self.impostazioni.chat_autorizzate, reverse=True):
             try:
                 self.invia_promemoria_scadenze(chat)
                 if self.orologio().day == 1:
                     self.invia_resoconto_mese_scorso(chat)
-            except ErroreArchivio as errore:
+            except (ErroreArchivio, ErroreTelegram) as errore:
                 log.warning("Promemoria e resoconto saltati per %s: %s", chat, errore)
 
     # --- Scadenze ---------------------------------------------------------------------
@@ -746,11 +792,11 @@ class Azdora:
             return None
         return None
 
-    def _chat_personale(self) -> int:
-        chat_id = self.impostazioni.chat_personale
-        if chat_id is None:
+    def _persone(self) -> tuple[int, ...]:
+        persone = self.impostazioni.persone
+        if not persone:
             raise RuntimeError("Manca TELEGRAM_CHAT_ID: non so a chi scrivere")
-        return chat_id
+        return persone
 
     # --- Controlli automatici (ogni 15 minuti da cron-job.org) --------------------------
 
@@ -763,16 +809,29 @@ class Azdora:
             return False
         return True
 
+    def _per_ogni_persona(self, controllo: Callable[[int], int]) -> int:
+        totale = 0
+        for chat_id in self._persone():
+            try:
+                totale += controllo(chat_id)
+            except ErroreTelegram as errore:
+                log.warning("%s non consegnato a %s: %s", controllo.__name__, chat_id, errore)
+        return totale
+
     def controlla_notizie(self) -> int:
-        """Manda le notizie nuove della zona. Restituisce quante ne ha mandate."""
-        chat_id = self._chat_personale()
-        if self.notizie is None or not self._serve_memoria("Notizie"):
+        """Manda a ognuno le notizie nuove della sua zona. Restituisce quante ne ha mandate."""
+        persone = self._persone()
+        if self.notizie is None or not self._serve_memoria("Notizie") or not persone:
             return 0
-        zona = self.zona()
+        return self._per_ogni_persona(self._notizie_per)
+
+    def _notizie_per(self, chat_id: int) -> int:
+        assert self.notizie is not None
+        zona = self.zona(chat_id)
         trovate = self.notizie.notizie_per(zona.comune, zona.lat, zona.lon, self.orologio())
         # La prima volta in una zona non si manda tutto l'arretrato: solo le ultime.
         (zona_nuova,) = self.archivio.segna_nuovi(
-            [f"zona-notizie:{zona.comune.lower()}"], RICORDO_ZONA_S
+            [f"zona-notizie:{chat_id}:{zona.comune.lower()}"], RICORDO_ZONA_S
         )
         if not trovate:
             return 0
@@ -781,7 +840,7 @@ class Azdora:
             for n, nuova in zip(
                 trovate,
                 self.archivio.segna_nuovi(
-                    [f"notizia:{n.impronta}" for n in trovate], RICORDO_NOTIZIE_S
+                    [f"notizia:{chat_id}:{n.impronta}" for n in trovate], RICORDO_NOTIZIE_S
                 ),
                 strict=True,
             )
@@ -795,11 +854,15 @@ class Azdora:
         return len(da_mandare)
 
     def controlla_allerte(self) -> int:
-        """Manda le allerte nuove (o salite di livello) della zona."""
-        chat_id = self._chat_personale()
-        if self.allerte is None or not self._serve_memoria("Allerte"):
+        """Manda a ognuno le allerte nuove (o salite di livello) della sua zona."""
+        persone = self._persone()
+        if self.allerte is None or not self._serve_memoria("Allerte") or not persone:
             return 0
-        zona = self.zona()
+        return self._per_ogni_persona(self._allerte_per)
+
+    def _allerte_per(self, chat_id: int) -> int:
+        assert self.allerte is not None
+        zona = self.zona(chat_id)
         if not zona.regione or not zona.paese:
             return 0
         adesso = self.orologio()
@@ -807,7 +870,9 @@ class Azdora:
         nuove = []
         for allerta in attive:
             durata = (allerta.fine - adesso).total_seconds() if allerta.fine else 3 * 24 * 3600
-            (nuova,) = self.archivio.segna_nuovi([allerta.chiave], max(int(durata), 3600))
+            (nuova,) = self.archivio.segna_nuovi(
+                [f"{allerta.chiave}:{chat_id}"], max(int(durata), 3600)
+            )
             if nuova:
                 nuove.append(allerta)
         if nuove:
