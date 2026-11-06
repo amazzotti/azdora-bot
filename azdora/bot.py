@@ -38,6 +38,7 @@ from azdora import rifiuti as modulo_rifiuti
 from azdora import scadenze as modulo_scadenze
 from azdora import spese as modulo_spese
 from azdora import telefono as modulo_telefono
+from azdora import tv as modulo_tv
 from azdora import weekend as modulo_weekend
 from azdora.allerte import FonteAllerte
 from azdora.archivio import Archivio, ArchivioMemoria, ErroreArchivio
@@ -129,6 +130,7 @@ COMANDI: tuple[tuple[str, str], ...] = (
     ("budget", "Budget mensile: /budget 800 o /budget auto 150"),
     ("conti", "Nel gruppo: chi deve quanto a chi"),
     ("pareggio", "Nel gruppo: siamo pari, si riparte da zero"),
+    ("tv", "Cosa c'è in TV stasera (/tv film, /tv adesso, /tv rai1)"),
     ("compleanni", "I compleanni segnati (aggiungi: /compleanno Giulia 2 maggio)"),
     ("posto", "Salva dove sei (casa, lavoro…) per i promemoria «quando arrivo»"),
     ("promemoria", "I tuoi promemoria"),
@@ -162,6 +164,8 @@ PRINCIPALI_IN_CODA = 3
 PRINCIPALI_AL_MATTINO = 2
 PRINCIPALI_A_RICHIESTA = 8
 TEMPO_MASSIMO_CONTROLLI_S = 45
+AGGIORNA_TV_OGNI = timedelta(hours=12)
+TV_PAROLE = {"sky", "film", "films", "adesso", "ora", "now", "domani", "stasera", "oggi"}
 NOMI_VOCI = {"notizie": "notizie", "avvisi": "avvisi di pioggia", "allerte": "allerte"}
 ORA_SCADENZE = dt_time(8, 0)
 VERIFICA_MENU_S = 6 * 3600  # ogni quanto ricontrollare il menu dei comandi
@@ -229,8 +233,10 @@ class Azdora:
         aria: FonteAria | None = None,
         carburante: FonteCarburante | None = None,
         imminente: FonteImminente | None = None,
+        guida_tv: modulo_tv.FonteGuida | None = None,
         orologio: Callable[[], datetime] = adesso_a_roma,
     ) -> None:
+        self.guida_tv = guida_tv
         self.impostazioni = impostazioni
         self.messaggero = messaggero
         self.meteo = meteo
@@ -273,6 +279,7 @@ class Azdora:
             "fissa": self._fissa_lista,
             "posto": self._posto,
             "compleanno": self._compleanno,
+            "tv": self._tv,
             "compleanni": self._compleanni,
             "posti": self._posto,
             "aggiungi": self._aggiungi,
@@ -1227,6 +1234,7 @@ class Azdora:
             self.controlla_notizie,
             self.controlla_sera,
             self.controlla_scadenze,
+            self.controlla_tv,
             self.controlla_menu,
         ):
             if time.monotonic() - inizio > TEMPO_MASSIMO_CONTROLLI_S:
@@ -1384,6 +1392,120 @@ class Azdora:
         righe = (modulo_promemoria.pulsanti(voci) or {}).get("inline_keyboard", [])
         righe = [*righe, *modulo_posti.pulsanti_elenco(persona, posti)]
         return testo, {"inline_keyboard": righe} if righe else None
+
+    # --- Guida TV ----------------------------------------------------------------------
+
+    def _tv(self, chat: Chat, comando: Comando) -> None:
+        parole = [p.lower() for p in comando.argomenti]
+        if parole and parole[0] in {"aiuto", "help", "?"}:
+            self.messaggero.invia_messaggio(chat.id, modulo_tv.USO)
+            return
+        sky = "sky" in parole
+        film = "film" in parole or "films" in parole
+        adesso_in_onda = bool({"adesso", "ora", "now"} & set(parole))
+        domani = "domani" in parole
+        resto = [p for p in parole if p not in TV_PAROLE]
+        adesso = self.orologio()
+        oggi = adesso.date()
+        canale = modulo_tv.cerca_canale(" ".join(resto)) if resto else None
+        if resto and canale is None:
+            self.messaggero.invia_messaggio(
+                chat.id, modulo_tv.CANALE_SCONOSCIUTO.format(nome=escape(" ".join(resto)))
+            )
+            return
+        gruppo = (
+            modulo_tv.GRUPPO_DEL_CANALE[canale]
+            if canale
+            else modulo_tv.SKY
+            if sky
+            else modulo_tv.GRATIS
+        )
+        programmi = self._programmi_tv(gruppo, oggi)
+        if not programmi:
+            self.messaggero.invia_messaggio(chat.id, modulo_tv.NON_DISPONIBILE)
+            return
+        giorno = oggi + timedelta(days=1) if domani else oggi
+        if canale:
+            testo = modulo_tv.messaggio_canale(
+                canale, modulo_tv.giornata_del_canale(programmi, canale, adesso)
+            )
+        elif adesso_in_onda:
+            testo = modulo_tv.messaggio_adesso(
+                modulo_tv.adesso_in_onda(programmi, adesso), adesso, sky
+            )
+        elif film:
+            testo = modulo_tv.messaggio_film(
+                modulo_tv.film_della_sera(programmi, giorno), giorno, oggi, sky
+            )
+        else:
+            testo = modulo_tv.messaggio_prima_serata(
+                modulo_tv.prima_serata(programmi, giorno), giorno, oggi, sky
+            )
+        self.messaggero.invia_messaggio(chat.id, testo)
+
+    def _programmi_tv(self, gruppo: str, oggi: date) -> list[modulo_tv.Programma]:
+        """La guida salvata (ieri, oggi, domani); se manca, la scarica adesso."""
+        giorni = [oggi - timedelta(days=1), oggi, oggi + timedelta(days=1)]
+        try:
+            salvati = modulo_tv.leggi_guida(self.archivio, giorni, gruppo)
+        except ErroreArchivio as errore:
+            log.warning("Guida TV salvata non leggibile: %s", errore)
+            salvati = []
+        if any(p.inizio.date() == oggi for p in salvati) or self.guida_tv is None:
+            return salvati
+        try:
+            fonte, scaricati = self.guida_tv.scarica()
+        except modulo_tv.ErroreGuida as errore:
+            log.warning("Guida TV non disponibile: %s", errore)
+            return salvati
+        with contextlib.suppress(ErroreArchivio):
+            modulo_tv.salva_guida(self.archivio, scaricati, fonte, self.orologio())
+        return [
+            p
+            for p in scaricati
+            if modulo_tv.GRUPPO_DEL_CANALE[p.canale] == gruppo and p.inizio.date() in giorni
+        ]
+
+    def controlla_tv(self) -> bool:
+        """Una volta al giorno (dalle 5): scarica la guida TV e la salva per i giorni dopo."""
+        if self.guida_tv is None or not self.archivio.persistente:
+            return False
+        adesso = self.orologio()
+        stato = self.archivio.leggi("tv-aggiornata") or {}
+        try:
+            ultima = datetime.fromisoformat(stato.get("quando", ""))
+        except ValueError:
+            ultima = None
+        if ultima is not None and adesso - ultima < AGGIORNA_TV_OGNI:
+            return False
+        if ultima is not None and adesso.hour < 5:
+            return False  # di notte le guide si stanno aggiornando: meglio aspettare
+        try:
+            fonte, programmi = self.guida_tv.scarica()
+        except modulo_tv.ErroreGuida as errore:
+            log.warning("Guida TV non aggiornata: %s", errore)
+            return False
+        giorni = modulo_tv.salva_guida(self.archivio, programmi, fonte, adesso)
+        log.info("Guida TV aggiornata da %s: %s giorni", fonte, giorni)
+        return True
+
+    def _stato_tv(self) -> str | None:
+        if self.guida_tv is None:
+            return None
+        try:
+            stato = self.archivio.leggi("tv-aggiornata") or {}
+        except ErroreArchivio:
+            stato = {}
+        if not stato.get("quando"):
+            return "📺 Guida TV: ⚠️ non ancora scaricata"
+        quando = datetime.fromisoformat(stato["quando"]).astimezone(FUSO_ORARIO)
+        vecchia = self.orologio() - quando > timedelta(days=2)
+        fino = date.fromisoformat(stato["fino"]) if stato.get("fino") else None
+        coperta = f", programmi fino al {fino:%d/%m}" if fino else ""
+        return (
+            f"📺 Guida TV: {'⚠️' if vecchia else '✅'} aggiornata il {quando:%d/%m alle %H:%M}"
+            f" ({escape(stato.get('fonte', '?'))}{coperta})"
+        )
 
     # --- Compleanni --------------------------------------------------------------------
 
@@ -2083,6 +2205,8 @@ class Azdora:
             else:
                 righe.append("✅ Nessun errore recente")
         righe.append(self._stato_sveglia())
+        if (tv := self._stato_tv()) is not None:
+            righe.append(tv)
         if (menu := self._stato_menu()) is not None:
             righe.append(menu)
         self.messaggero.invia_messaggio(chat.id, "\n".join(righe))

@@ -218,6 +218,7 @@ AIUTO = """👋 <b>Ciao, sono l'Azdora!</b> Mando avanti la casa. Scrivimi come 
 /posto lavoro – salva dove sei, per <i>«ricordami… quando arrivo al lavoro»</i>
 /orari – quando ti scrivo (mattino, sera, notizie, silenzio)
 /telefono – posizione automatica dal telefono · /stato – come sto
+/tv – stasera in TV · /tv film · /tv adesso · /tv rai1
 /weekend – meteo, gite e sagre · /sagre – feste da Cervia a Pesaro
 
 Ogni mattina alle 7 ti mando il riepilogo ☕. /id – l'id di questa chat"""

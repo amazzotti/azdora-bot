@@ -64,6 +64,7 @@ Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `s
 | `/budget 800` · `/budget auto 150` | Budget mensile, totale o per categoria. Sotto ogni spesa vedi a che punto sei, con ⚠️ all'80% e 🚨 quando lo superi |
 | `/conti` · `/pareggio` | **Nel gruppo**: ogni spesa ricorda chi l'ha pagata. `/conti` dice chi deve quanto a chi (spese divise in parti uguali, con il minor numero di passaggi); `/pareggio` riparte da zero |
 | `/promemoria` · `/ricordami …` | I promemoria in arrivo (anche quelli legati a un posto), con 🗑 per cancellarli |
+| `/tv` · `/tv film` · `/tv adesso` · `/tv domani` · `/tv rai1` · `/tv sky` | **Guida TV**: la prima serata di stasera sui canali del digitale terrestre (dalla 1 alla 66, in ordine di telecomando), solo i film con la trama, cosa c'è adesso e dopo, la giornata di un canale, gli stessi per Sky. La guida si aggiorna da sola due volte al giorno da fonti XMLTV gratuite (con fonti di riserva) e resta salvata per i giorni dopo: se le fonti si fermano, `/tv` continua a funzionare. `/stato` dice quando è stata aggiornata |
 | `/compleanni` · `/compleanno Giulia 2/5/1995` | I compleanni segnati, dal più vicino, con 🗑 per toglierli. Nel gruppo valgono per il gruppo (e lì si segnano solo con «ricordami…» o con il comando, così le chiacchiere non diventano compleanni) |
 | `/posto lavoro` · `/posto` · `/posto lavoro off` | Salva dove sei adesso con un nome (casa, lavoro, mamma, palestra…), per i promemoria «quando arrivo al lavoro». Il promemoria scatta quando *entri* nel posto: se ci sei già, aspetta che esci e rientri. Serve la posizione automatica (`/telefono`, anche con l'automazione *Arrivo* di Comandi Rapidi) o quella in tempo reale |
 | `/rifiuti martedì plastica, carta` | Il calendario della raccolta differenziata: la sera prima, verso le 20, ti dice cosa portare fuori |
@@ -372,6 +373,7 @@ azdora-bot/
   - bill and car-tax reminders with a "Paid" button (recurring deadlines roll forward and become expenses);
   - monthly expenses with automatic categories, monthly reports and CSV export;
   - a shared checklist for couples that can live pinned at the top of the chat and update itself, and weekend ideas (weather-aware day trips and local festivals);
+  - a TV guide (prime time, films, now on air, per-channel) from free XMLTV sources with fallbacks and a multi-day cache;
   - birthday reminders a week before, the day before and on the day, with age;
   - location-based reminders ("remind me to buy bread when I get to Rimini") triggered by the phone's automatic location;
   - plain-language input: "45 fuel" or "remind me tomorrow at 6pm to call the mechanic" (in Italian), with rule-based parsing and no paid AI;

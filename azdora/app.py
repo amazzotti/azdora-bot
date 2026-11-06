@@ -17,6 +17,7 @@ from azdora.meteo.imminente import OpenMeteoImminente
 from azdora.meteo.openmeteo import OpenMeteo
 from azdora.notizie import LettoreNotizie
 from azdora.telegram import Telegram
+from azdora.tv import GuideXmltv
 
 USER_AGENT = "azdora-bot (+https://github.com/amazzotti/azdora-bot)"
 
@@ -52,4 +53,5 @@ def crea_azdora(impostazioni: Impostazioni, http: httpx.Client) -> Azdora:
         aria=OpenMeteoAria(http),
         carburante=Osservaprezzi(http),
         imminente=OpenMeteoImminente(http),
+        guida_tv=GuideXmltv(http),
     )

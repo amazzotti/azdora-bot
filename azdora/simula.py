@@ -56,6 +56,7 @@ from azdora.notizie import (
     parla_di,
     prima_quelle_di,
 )
+from azdora.tv import GuideXmltv
 
 CHAT_SIMULATA = 1
 CARTELLA_ESEMPI = Path(__file__).resolve().parent.parent / "tests" / "fixtures"
@@ -259,6 +260,7 @@ def main(argomenti: list[str] | None = None) -> int:
                 aria=OpenMeteoAria(http),
                 carburante=Osservaprezzi(http),
                 imminente=OpenMeteoImminente(http),
+                guida_tv=GuideXmltv(http),
             )
 
         for testo in scelte.messaggi:
