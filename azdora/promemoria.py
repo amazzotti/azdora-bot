@@ -86,20 +86,24 @@ class Promemoria:
 
     @classmethod
     def da_dizionario(cls, dati: dict[str, Any]) -> Promemoria:
-        return cls(
-            dati["id"], datetime.fromisoformat(dati["quando"]), dati["testo"], dati.get("ripeti")
-        )
+        quando = datetime.fromisoformat(dati["quando"])
+        if quando.tzinfo is not None:
+            # Salvato con lo scarto fisso (+02:00): torniamo all'ora di Roma, con l'ora legale.
+            quando = quando.astimezone(FUSO_ORARIO)
+        return cls(dati["id"], quando, dati["testo"], dati.get("ripeti"))
 
 
 def prossima_volta(quando: datetime, ripeti: str) -> datetime:
     """La volta successiva di un promemoria che si ripete."""
+    locale = quando.astimezone(FUSO_ORARIO) if quando.tzinfo else quando
     if ripeti == "giorno":
-        return quando + timedelta(days=1)
-    if ripeti == "settimana":
-        return quando + timedelta(weeks=1)
-    mesi = 12 if ripeti == "anno" else 1
-    giorno = aggiungi_mesi(quando.date(), mesi)
-    return datetime.combine(giorno, quando.timetz())
+        giorno = locale.date() + timedelta(days=1)
+    elif ripeti == "settimana":
+        giorno = locale.date() + timedelta(weeks=1)
+    else:
+        giorno = aggiungi_mesi(locale.date(), 12 if ripeti == "anno" else 1)
+    # Stessa ora "di orologio" anche se nel frattempo è cambiata l'ora legale.
+    return datetime.combine(giorno, locale.time(), locale.tzinfo)
 
 
 class ErrorePromemoria(ValueError):
@@ -226,6 +230,16 @@ class RegistroPromemoria:
     def _ultimo_id(self) -> int:
         """Gli id non si riusano mai: i pulsanti "rimanda" di un vecchio avviso restano giusti."""
         return int(self._archivio.leggi(f"{self._chiave}:ultimo-id") or 0)
+
+    def rimetti(self, voci: Sequence[Promemoria]) -> None:
+        """Rimette in lista i promemoria singoli che non si sono potuti consegnare.
+
+        I ricorrenti sono già spostati alla volta successiva: quelli restano dove sono.
+        """
+        singoli = [p for p in voci if not p.ripeti]
+        if singoli:
+            ids = {p.id for p in singoli}
+            self._salva([*(p for p in self.tutti() if p.id not in ids), *singoli])
 
     def scaduti(self, adesso: datetime) -> list[Promemoria]:
         """Restituisce i promemoria arrivati all'ora giusta.

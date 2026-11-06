@@ -11,9 +11,11 @@ import contextlib
 import hashlib
 import logging
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
+from datetime import time as dt_time
 from html import escape
 from typing import Any
 
@@ -55,7 +57,14 @@ from azdora.meteo.aria import FonteAria, avvisi_aria, messaggio_aria
 from azdora.meteo.imminente import FonteImminente, valuta
 from azdora.meteo.openmeteo import ErroreMeteo, FonteMeteo, PrevisioniMare
 from azdora.notizie import FonteNotizie, Notizia
-from azdora.orari import ErroreOrari, Orari, PreferenzeOrari, in_orario, in_silenzio
+from azdora.orari import (
+    FINESTRA,
+    ErroreOrari,
+    Orari,
+    PreferenzeOrari,
+    in_orario,
+    in_silenzio,
+)
 from azdora.posizione import (
     SPOSTAMENTO_MINIMO_KM,
     VALIDITA_ZONA,
@@ -146,6 +155,9 @@ NOTIZIE_NEL_RIASSUNTO = 10
 PRINCIPALI_IN_CODA = 3
 PRINCIPALI_AL_MATTINO = 2
 PRINCIPALI_A_RICHIESTA = 8
+TEMPO_MASSIMO_CONTROLLI_S = 45
+ORA_SCADENZE = dt_time(8, 0)
+VERIFICA_MENU_S = 6 * 3600  # ogni quanto ricontrollare il menu dei comandi
 ERRORE_RECENTE_S = 3600  # errori di Telegram dell'ultima ora: c'è da riparare
 PAUSA_AVVISI_S = 4 * 3600  # lo stesso avviso meteo non prima di 4 ore
 # Come li chiamano tutti in Romagna → il nome vero, per cercarli.
@@ -353,6 +365,12 @@ class Azdora:
         except ErroreArchivio as errore:
             log.warning("Archivio non disponibile: %s", errore)
             self.messaggero.invia_messaggio(chat.id, messaggi.ARCHIVIO_NON_DISPONIBILE)
+        except ErroreTelegram:
+            raise
+        except Exception:
+            # Meglio una risposta di scuse che il silenzio.
+            log.exception("Errore inatteso su %r", testo[:40])
+            self.messaggero.invia_messaggio(chat.id, messaggi.ERRORE_INATTESO)
 
     def _non_per_me(self, comando: Comando) -> bool:
         """Nei gruppi ``/meteo@altro_bot`` è rivolto a un altro bot."""
@@ -515,6 +533,9 @@ class Azdora:
 
     def _aiuto(self, chat: Chat, comando: Comando) -> None:
         self.messaggero.invia_messaggio(chat.id, messaggi.AIUTO)
+        # Chi chiede aiuto deve trovare anche il menu giusto.
+        with contextlib.suppress(ErroreTelegram, ErroreArchivio):
+            self.controlla_menu()
 
     def _id(self, chat: Chat, comando: Comando) -> None:
         self.messaggero.invia_messaggio(chat.id, messaggi.messaggio_id(chat.id, True))
@@ -690,13 +711,26 @@ class Azdora:
         self._promemoria_scadenze_e_resoconti()
 
     def _promemoria_scadenze_e_resoconti(self) -> None:
+        """Scadenze in arrivo e (il 1°) il resoconto del mese: una volta al giorno per chat."""
+        oggi = self._oggi_data()
         for chat in sorted(self.impostazioni.chat_autorizzate, reverse=True):
+            chiave = f"scadenze:{chat}:{oggi}"
             try:
+                (nuovo,) = self.archivio.segna_nuovi([chiave], 2 * 24 * 3600)
+                if not nuovo:
+                    continue
                 self.invia_promemoria_scadenze(chat)
-                if self.orologio().day == 1:
+                if oggi.day == 1:
                     self.invia_resoconto_mese_scorso(chat)
             except (ErroreArchivio, ErroreTelegram) as errore:
                 log.warning("Promemoria e resoconto saltati per %s: %s", chat, errore)
+
+    def controlla_scadenze(self) -> None:
+        """Le scadenze arrivano anche a chi ha spento il riepilogo del mattino (dalle 8)."""
+        if not self.archivio.persistente:
+            return
+        if self.orologio().time().replace(tzinfo=None) >= ORA_SCADENZE:
+            self._promemoria_scadenze_e_resoconti()
 
     # --- Scadenze ---------------------------------------------------------------------
 
@@ -897,6 +931,10 @@ class Azdora:
         except (ErroreArchivio, ValueError) as errore:
             log.warning("Pulsante %s non riuscito: %s", azione, errore)
             avviso = "😓 Non ci sono riuscita, riprova"
+        except Exception:
+            # Es. messaggio troppo vecchio da modificare: la clessidra va tolta comunque.
+            log.exception("Pulsante %s non riuscito", azione)
+            avviso = "😓 Non ci sono riuscita, riprova"
         self.messaggero.rispondi_pulsante(id_tocco, avviso)
 
     def _esegui_pulsante(
@@ -1046,8 +1084,8 @@ class Azdora:
 
     def controlli(self) -> None:
         """Il giro di controlli periodico: promemoria, allerte, notizie e (alle 20) la sera."""
+        inizio = time.monotonic()
         for controllo in (
-            self.controlla_menu,
             self.controlla_salute,
             self.controlla_promemoria,
             self.controlla_mattino,
@@ -1055,11 +1093,22 @@ class Azdora:
             self.controlla_imminente,
             self.controlla_notizie,
             self.controlla_sera,
+            self.controlla_scadenze,
+            self.controlla_menu,
         ):
+            if time.monotonic() - inizio > TEMPO_MASSIMO_CONTROLLI_S:
+                # Vercel ferma tutto a 60 secondi: il resto lo fa il giro dopo.
+                log.warning("Controllo %s rimandato: giro troppo lungo", controllo.__name__)
+                continue
             try:
                 controllo()
             except (ErroreArchivio, ErroreMeteo) as errore:
                 log.warning("Controllo %s saltato: %s", controllo.__name__, errore)
+            except Exception:
+                # Un controllo che si rompe non deve fermare gli altri (notizie, allerte…).
+                log.exception("Controllo %s fallito", controllo.__name__)
+        with contextlib.suppress(ErroreArchivio):
+            self.archivio.scrivi("ultimo-giro", self.orologio().isoformat(), 7 * 24 * 3600)
 
     # --- Messaggi liberi ---------------------------------------------------------------
 
@@ -1210,16 +1259,22 @@ class Azdora:
         adesso = self.orologio()
         mandati = 0
         for chat_id in sorted(self.impostazioni.chat_autorizzate):
-            try:
-                for voce in RegistroPromemoria(self.archivio, chat_id).scaduti(adesso):
+            registro = RegistroPromemoria(self.archivio, chat_id)
+            da_riprovare = []
+            for voce in registro.scaduti(adesso):
+                try:
                     self.messaggero.invia_messaggio(
                         chat_id,
                         modulo_promemoria.avviso(voce),
                         modulo_promemoria.pulsanti_avviso(voce),
                     )
                     mandati += 1
-            except ErroreTelegram as errore:
-                log.warning("Promemoria non consegnato a %s: %s", chat_id, errore)
+                except ErroreTelegram as errore:
+                    log.warning("Promemoria non consegnato a %s: %s", chat_id, errore)
+                    if not _errore_definitivo(errore):
+                        da_riprovare.append(voce)
+            if da_riprovare:
+                registro.rimetti(da_riprovare)  # al prossimo giro, fra 15 minuti
         return mandati
 
     def controlla_sera(self) -> int:
@@ -1387,29 +1442,47 @@ class Azdora:
             mattino = self.orari.di(chat_id).mattino
             if mattino is None or not in_orario(adesso, mattino):
                 continue
-            (nuovo,) = self.archivio.segna_nuovi(
-                [f"mattino:{chat_id}:{adesso.date()}"], 2 * 24 * 3600
-            )
-            if nuovo:
-                self._riepilogo_per(chat_id)
+            chiave = f"mattino:{chat_id}:{adesso.date()}"
+            if not self.archivio.sono_nuovi([chiave])[0]:
+                continue
+            # Se il meteo non risponde, si riprova al giro dopo (finché c'è tempo).
+            ultimo_giro = not in_orario(adesso, mattino, FINESTRA - timedelta(minutes=20))
+            testo = self._testo_mattino(chat_id, riprova=not ultimo_giro)
+            if testo is None:
+                continue
+            (nuovo,) = self.archivio.segna_nuovi([chiave], 2 * 24 * 3600)
+            if not nuovo:
+                continue  # l'ha già mandato un altro giro nel frattempo
+            if self._consegna(chat_id, testo, "Riepilogo"):
                 mandati += 1
+            elif not ultimo_giro:
+                self.archivio.cancella(chiave)  # Telegram non ha risposto: si riprova
         if mandati:
             self._promemoria_scadenze_e_resoconti()
         return mandati
 
-    def _riepilogo_per(self, chat_id: int) -> None:
+    def _testo_mattino(self, chat_id: int, riprova: bool = False) -> str | None:
+        """Il testo del riepilogo; ``None`` se il meteo non c'è e conviene riprovare dopo."""
         try:
             testo = self.testo_oggi(
                 saluta=True, zona=self._zona_sicura(chat_id), nome=self.nome_di(chat_id)
             )
-            testo = self._aggiungi_extra_mattino(chat_id, testo)
         except ErroreMeteo as errore:
             log.error("Riepilogo mattutino senza meteo: %s", errore)
-            testo = messaggi.METEO_NON_DISPONIBILE
+            return None if riprova else messaggi.METEO_NON_DISPONIBILE
+        return self._aggiungi_extra_mattino(chat_id, testo)
+
+    def _consegna(self, chat_id: int, testo: str, cosa: str) -> bool:
         try:
             self.messaggero.invia_messaggio(chat_id, testo)
         except ErroreTelegram as errore:
-            log.warning("Riepilogo non consegnato a %s: %s", chat_id, errore)
+            log.warning("%s non consegnato a %s: %s", cosa, chat_id, errore)
+            return False
+        return True
+
+    def _riepilogo_per(self, chat_id: int) -> None:
+        if testo := self._testo_mattino(chat_id):
+            self._consegna(chat_id, testo, "Riepilogo")
 
     def _aggiungi_extra_mattino(self, chat_id: int, testo: str) -> str:
         """In fondo al riepilogo: i promemoria di oggi e le prime notizie."""
@@ -1433,6 +1506,9 @@ class Azdora:
                     parti.append(coda.strip())
         except ErroreArchivio as errore:
             log.warning("Extra del mattino saltati: %s", errore)
+        except Exception:
+            # Un giornale con dati strani non deve far saltare il riepilogo.
+            log.exception("Extra del mattino saltati")
         return "\n\n".join(p for p in parti if p)
 
     def _notizie_nuove(self, chat_id: int, quante: int) -> list[Notizia]:
@@ -1628,8 +1704,16 @@ class Azdora:
         errore_ts = info.get("last_error_date")
         adesso = self.orologio()
         recente = errore_ts and adesso.timestamp() - float(errore_ts) < ERRORE_RECENTE_S
+        bloccata_prima = bool(self.archivio.leggi("coda-bloccata"))
         if in_coda == 0 or not recente:
+            if bloccata_prima:
+                self.archivio.cancella("coda-bloccata")
             return False
+        if not bloccata_prima:
+            # Al primo giro si aspetta: magari Telegram la sta già smaltendo.
+            self.archivio.scrivi("coda-bloccata", in_coda, 3600)
+            return False
+        self.archivio.cancella("coda-bloccata")
         imposta = getattr(self.messaggero, "imposta_webhook", None)
         if imposta is None:
             return False
@@ -1659,17 +1743,64 @@ class Azdora:
                 righe.append(f"⚠️ Ultimo errore: {escape(errore)} ({quando:%d/%m %H:%M})")
             else:
                 righe.append("✅ Nessun errore recente")
+        righe.append(self._stato_sveglia())
+        if (menu := self._stato_menu()) is not None:
+            righe.append(menu)
         self.messaggero.invia_messaggio(chat.id, "\n".join(righe))
 
-    def controlla_menu(self) -> bool:
-        """Se l'elenco dei comandi è cambiato (nuova versione), aggiorna il menu di Telegram."""
+    def _stato_sveglia(self) -> str:
+        try:
+            ultimo = self.archivio.leggi("ultimo-giro")
+        except ErroreArchivio:
+            ultimo = None
+        if not ultimo:
+            return "⏰ Sveglia (cron-job.org): ⚠️ nessun giro registrato"
+        quando = datetime.fromisoformat(ultimo).astimezone(FUSO_ORARIO)
+        minuti = int((self.orologio() - quando).total_seconds() // 60)
+        segno = "✅" if minuti <= 30 else "⚠️"
+        return f"⏰ Sveglia: {segno} ultimo giro alle {quando:%H:%M} ({minuti} min fa)"
+
+    def _stato_menu(self) -> str | None:
+        leggi = getattr(self.messaggero, "leggi_comandi", None)
+        if leggi is None:
+            return None
+        attesi = [nome for nome, _ in COMANDI]
+        try:
+            if leggi() == attesi:
+                return f"📋 Menu comandi: ✅ aggiornato ({len(attesi)} comandi)"
+            self.controlla_menu(forza=True)
+        except (ErroreTelegram, ErroreArchivio) as errore:
+            return f"📋 Menu comandi: ⚠️ non riesco ad aggiornarlo ({escape(str(errore))})"
+        return f"📋 Menu comandi: 🔧 era vecchio, l'ho appena aggiornato ({len(attesi)} comandi)"
+
+    def controlla_menu(self, forza: bool = False) -> bool:
+        """Tiene aggiornato il menu dei comandi di Telegram (quello che appare scrivendo /).
+
+        Ogni 6 ore (o subito dopo una nuova versione) chiede a Telegram che menu mostra e,
+        se non è quello giusto, lo reimposta. Restituisce ``True`` se l'ha cambiato.
+        """
         imposta = getattr(self.messaggero, "imposta_comandi", None)
-        if imposta is None or not self.archivio.persistente:
+        if imposta is None:
             return False
         impronta = hashlib.sha256(repr(COMANDI).encode("utf-8")).hexdigest()[:16]
-        if self.archivio.leggi("menu-comandi") == impronta:
+        if not forza and self.archivio.leggi("menu-comandi") == impronta:
             return False
+        leggi = getattr(self.messaggero, "leggi_comandi", None)
+        if not forza and leggi is not None:
+            try:
+                giusto = leggi() == [nome for nome, _ in COMANDI]
+            except ErroreTelegram:
+                giusto = False
+            if giusto:
+                self.archivio.scrivi("menu-comandi", impronta, VERIFICA_MENU_S)
+                return False
         imposta(COMANDI)
-        self.archivio.scrivi("menu-comandi", impronta)
+        self.archivio.scrivi("menu-comandi", impronta, VERIFICA_MENU_S)
         log.info("Menu dei comandi aggiornato (%s comandi)", len(COMANDI))
         return True
+
+
+def _errore_definitivo(errore: ErroreTelegram) -> bool:
+    """Bot bloccato o chat sparita: inutile riprovare."""
+    testo = str(errore).lower()
+    return any(s in testo for s in ("forbidden", "chat not found", "blocked", "deactivated"))

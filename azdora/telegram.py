@@ -96,6 +96,16 @@ class Messaggero(Protocol):
 # come messaggio modificato), tocchi sui pulsanti e ingresso/uscita dai gruppi.
 UPDATE_CONSENTITI = ["message", "edited_message", "callback_query", "my_chat_member"]
 
+# Il menu dei comandi si imposta per tutti gli "ambiti" e anche per l'italiano: Telegram
+# mostra la lista più specifica che trova (es. "chat private in italiano" vince su quella
+# generica), quindi una lista vecchia rimasta lì nasconderebbe quella nuova.
+AMBITI_COMANDI: tuple[dict[str, str], ...] = (
+    {"type": "default"},
+    {"type": "all_private_chats"},
+    {"type": "all_group_chats"},
+)
+LINGUE_COMANDI: tuple[str | None, ...] = (None, "it")
+
 
 class Telegram:
     def __init__(self, token: str, http: httpx.Client) -> None:
@@ -202,10 +212,20 @@ class Telegram:
         return self.chiama("getWebhookInfo")
 
     def imposta_comandi(self, comandi: Iterable[tuple[str, str]]) -> None:
-        self.chiama(
-            "setMyCommands",
-            commands=[{"command": nome, "description": descr} for nome, descr in comandi],
+        lista = [{"command": nome, "description": descr} for nome, descr in comandi]
+        for ambito in AMBITI_COMANDI:
+            for lingua in LINGUE_COMANDI:
+                parametri: dict[str, Any] = {"commands": lista, "scope": ambito}
+                if lingua:
+                    parametri["language_code"] = lingua
+                self.chiama("setMyCommands", **parametri)
+
+    def leggi_comandi(self) -> list[str]:
+        """I comandi che vede adesso chi scrive al bot in privato, con Telegram in italiano."""
+        risultato = self.chiama(
+            "getMyCommands", scope={"type": "all_private_chats"}, language_code="it"
         )
+        return [c.get("command", "") for c in risultato or []]
 
     def chi_sono(self) -> dict[str, Any]:
         return self.chiama("getMe")

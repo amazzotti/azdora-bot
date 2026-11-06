@@ -291,6 +291,10 @@ def titolo_notizie_riviera(comune: str) -> str:
     return f"🗞️ <b>Le notizie di oggi, da Cervia a Pesaro</b>\n<i>📍 = parla di {escape(comune)}</i>"
 
 
+ERRORE_INATTESO = (
+    "😓 Qualcosa è andato storto mentre ci lavoravo. Riprova tra un attimo; "
+    "se continua, scrivi /stato."
+)
 TITOLO_NOTIZIE_OGGI = "🗞️ <b>Le notizie di oggi</b>"
 
 

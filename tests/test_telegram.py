@@ -122,8 +122,23 @@ def test_imposta_webhook_con_segreto(telegram):
 def test_imposta_comandi(telegram):
     rotta = respx.post(f"{BASE}/setMyCommands").mock(return_value=_ok())
     telegram.imposta_comandi([("meteo", "Il meteo")])
-    inviato = json.loads(rotta.calls.last.request.content)
-    assert inviato == {"commands": [{"command": "meteo", "description": "Il meteo"}]}
+    inviati = [json.loads(c.request.content) for c in rotta.calls]
+    assert all(i["commands"] == [{"command": "meteo", "description": "Il meteo"}] for i in inviati)
+    ambiti = {(i["scope"]["type"], i.get("language_code")) for i in inviati}
+    assert ambiti == {
+        (tipo, lingua)
+        for tipo in ("default", "all_private_chats", "all_group_chats")
+        for lingua in (None, "it")
+    }
+
+
+@respx.mock
+def test_leggi_comandi(telegram):
+    rotta = respx.post(f"{BASE}/getMyCommands").mock(
+        return_value=_ok([{"command": "oggi", "description": "x"}])
+    )
+    assert telegram.leggi_comandi() == ["oggi"]
+    assert json.loads(rotta.calls.last.request.content)["language_code"] == "it"
 
 
 @respx.mock

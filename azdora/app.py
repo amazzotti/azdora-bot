@@ -28,7 +28,7 @@ def configura_log() -> None:
 
 
 def nuovo_client_http() -> httpx.Client:
-    return httpx.Client(timeout=httpx.Timeout(10.0), headers={"User-Agent": USER_AGENT})
+    return httpx.Client(timeout=httpx.Timeout(8.0, connect=4.0), headers={"User-Agent": USER_AGENT})
 
 
 def crea_archivio(impostazioni: Impostazioni, http: httpx.Client) -> Archivio:

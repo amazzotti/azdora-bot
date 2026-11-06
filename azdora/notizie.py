@@ -15,7 +15,7 @@ import re
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from html import escape, unescape
 from typing import Protocol
@@ -186,16 +186,18 @@ def _data(testo: str | None) -> datetime | None:
     if not testo:
         return None
     try:
-        return parsedate_to_datetime(testo.strip())
-    except (TypeError, ValueError):
+        data = parsedate_to_datetime(testo.strip())
+    except (TypeError, ValueError, IndexError):
         return None
+    # "-0000" o nessun fuso: è UTC. Senza fuso le date non si possono confrontare.
+    return data if data.tzinfo is not None else data.replace(tzinfo=UTC)
 
 
 def leggi_feed(xml: bytes | str, fonte: str) -> list[Notizia]:
     """Legge un feed RSS 2.0. Le voci senza titolo o link vengono scartate."""
     try:
         radice = ElementTree.fromstring(xml)
-    except (ElementTree.ParseError, DefusedXmlException) as errore:
+    except (ElementTree.ParseError, DefusedXmlException, LookupError, ValueError) as errore:
         log.warning("Feed %s non leggibile: %s", fonte, errore)
         return []
     notizie = []
@@ -440,6 +442,14 @@ class LettoreNotizie:
         return self._gia_scaricati[fonte.url]
 
     def _scarica_davvero(self, fonte: Fonte) -> list[Notizia]:
+        try:
+            return self._scarica_e_pulisci(fonte)
+        except Exception:
+            # Un giornale con un feed strano non deve far sparire tutti gli altri.
+            log.exception("Feed %s scartato", fonte.nome)
+            return []
+
+    def _scarica_e_pulisci(self, fonte: Fonte) -> list[Notizia]:
         notizie = self._leggi(fonte.url, fonte.nome) or []
         if fonte.url.startswith("https://news.google.com/") and fonte.nome != "Google News":
             # Da Google arrivano con il nome scritto dal giornale ("RiminiToday"): uniformiamo.

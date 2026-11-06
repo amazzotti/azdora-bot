@@ -65,6 +65,7 @@ Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `s
 | `/sera` | Attiva o spegne il **riepilogo delle 20**: meteo di domani, promemoria e scadenze del giorno dopo |
 | `/aria [località]` | Indice UV con consiglio, qualità dell'aria e pollini (graminacee, betulla, olivo, ambrosia…). Nel riepilogo compaiono solo quando servono |
 | `/benzina [gasolio\|gpl\|metano] [località]` | I 5 distributori più economici entro 7 km, con prezzo, self/servito, distanza e link alla mappa, dai dati ufficiali del Ministero |
+| `/stato` | Come sta il bot: versione, memoria, messaggi bloccati, **ultimo giro della sveglia** e se il **menu dei comandi** è aggiornato (se non lo è, lo sistema subito) |
 | `/id` | L'id della chat, da usare nella configurazione |
 | `/aiuto` | L'elenco dei comandi |
 
@@ -77,7 +78,9 @@ In più, da sola, **agli orari che scegli con `/orari`**:
 - nelle **ore di silenzio** (di default 23–7) niente notizie né avvisi: passano solo i promemoria e le allerte arancioni e rosse;
 - **la sera** (di default alle 20) ti ricorda i **rifiuti** da portare fuori e, se hai attivato `/sera`, ti manda il riepilogo di domani.
 
-**Messaggi lunghi e menu sempre aggiornati.** Telegram accetta al massimo 4096 caratteri per messaggio: se un riepilogo è più lungo, l'Azdora lo divide a fine riga in più messaggi, senza mai spezzare un link. Se Telegram rifiutasse la formattazione, lo rimanda come testo semplice: meglio brutto che niente. Quando escono comandi nuovi, il menu `/` di Telegram si aggiorna da solo al giro successivo della sveglia.
+**Messaggi lunghi e menu sempre aggiornati.** Telegram accetta al massimo 4096 caratteri per messaggio: se un riepilogo è più lungo, l'Azdora lo divide a fine riga in più messaggi, senza mai spezzare un link. Se Telegram rifiutasse la formattazione, lo rimanda come testo semplice: meglio brutto che niente. Quando escono comandi nuovi, il menu `/` di Telegram si aggiorna da solo al giro successivo della sveglia (per le chat private, i gruppi e Telegram in italiano), e ogni 6 ore il bot ricontrolla che sia ancora giusto.
+
+**Se qualcosa va storto non si perde niente**: un promemoria che Telegram non ha accettato si riprova al giro dopo; se alle 7 il meteo non risponde, il riepilogo si riprova ogni 15 minuti invece di arrivare vuoto; un giornale con un feed difettoso viene saltato senza fermare gli altri; un controllo che si rompe non blocca i successivi; e se un comando incontra un errore imprevisto, l'Azdora risponde comunque invece di restare muta.
 
 **Chi decide quando arrivano?** La sveglia di cron-job.org chiama il bot ogni 15 minuti. A ogni giro il bot guarda gli orari di ognuno e manda solo quello che è arrivato il momento di mandare, una volta sola. Il cronjob delle 7 (`job=mattino`) può restare: rispetta comunque gli orari di `/orari`.
 

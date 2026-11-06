@@ -137,28 +137,69 @@ def test_riassunto_delle_notizie_valido(pieno, messaggero):
 
 
 class MessaggeroConMenu(FintoMessaggero):
-    def __init__(self):
+    """Come Telegram: ricorda il menu impostato e lo restituisce a chi lo chiede."""
+
+    def __init__(self, attuale=("oggi", "meteo")):
         super().__init__()
         self.menu: list[tuple[tuple[str, str], ...]] = []
+        self.attuale = list(attuale)
+        self.letture = 0
 
     def imposta_comandi(self, comandi):
         self.menu.append(tuple(comandi))
+        self.attuale = [nome for nome, _ in comandi]
+
+    def leggi_comandi(self):
+        self.letture += 1
+        return list(self.attuale)
 
 
-def test_menu_dei_comandi_aggiornato_da_solo_una_volta(impostazioni, meteo, archivio):
-    telegram = MessaggeroConMenu()
+def test_menu_vecchio_aggiornato_da_solo(impostazioni, meteo, archivio):
+    telegram = MessaggeroConMenu()  # Telegram mostra ancora un menu vecchio
     bot = Azdora(impostazioni, telegram, meteo, archivio=archivio, orologio=lambda: ADESSO)
     assert bot.controlla_menu()
     assert telegram.menu == [COMANDI]
-    assert {"italia", "mondo"} <= {nome for nome, _ in telegram.menu[0]}
-    assert not bot.controlla_menu()  # già aggiornato: non lo rifà a ogni giro
-    archivio.scrivi("menu-comandi", "versione-vecchia")
-    assert bot.controlla_menu() and len(telegram.menu) == 2
+    assert {"italia", "mondo"} <= set(telegram.attuale)
+    assert not bot.controlla_menu()  # già verificato: non chiede niente a ogni giro
+    assert telegram.letture == 1
+    archivio.cancella("menu-comandi")  # passate 6 ore: ricontrolla, ma è già giusto
+    assert not bot.controlla_menu() and len(telegram.menu) == 1 and telegram.letture == 2
 
 
-def test_menu_senza_memoria_non_si_tocca(impostazioni, meteo):
+def test_menu_ricontrollato_anche_senza_memoria(impostazioni, meteo):
     from azdora.archivio import ArchivioMemoria
 
     telegram = MessaggeroConMenu()
     bot = Azdora(impostazioni, telegram, meteo, archivio=ArchivioMemoria(), orologio=lambda: ADESSO)
-    assert not bot.controlla_menu() and telegram.menu == []
+    assert bot.controlla_menu() and telegram.menu == [COMANDI]
+
+
+def test_aiuto_sistema_il_menu(impostazioni, meteo, archivio):
+    telegram = MessaggeroConMenu()
+    bot = Azdora(impostazioni, telegram, meteo, archivio=archivio, orologio=lambda: ADESSO)
+    bot.gestisci_update(messaggio("/aiuto"))
+    assert "Azdora" in telegram.ultimo and telegram.menu == [COMANDI]
+
+
+def test_stato_dice_se_menu_e_sveglia_funzionano(impostazioni, meteo, archivio):
+    telegram = MessaggeroConMenu()
+    bot = Azdora(impostazioni, telegram, meteo, archivio=archivio, orologio=lambda: ADESSO)
+    bot.gestisci_update(messaggio("/stato"))
+    assert "nessun giro registrato" in telegram.ultimo
+    assert "l'ho appena aggiornato" in telegram.ultimo and telegram.menu == [COMANDI]
+    bot.controlli()
+    bot.gestisci_update(messaggio("/stato"))
+    assert "✅ ultimo giro alle 07:05" in telegram.ultimo
+    assert f"✅ aggiornato ({len(COMANDI)} comandi)" in telegram.ultimo
+
+
+def test_un_controllo_rotto_non_ferma_gli_altri(bot, monkeypatch):
+    chiamati = []
+
+    def rotto():
+        raise KeyError("dato inatteso")
+
+    monkeypatch.setattr(bot, "controlla_promemoria", rotto)
+    monkeypatch.setattr(bot, "controlla_notizie", lambda: chiamati.append("notizie"))
+    bot.controlli()
+    assert chiamati == ["notizie"]

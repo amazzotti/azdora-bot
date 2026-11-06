@@ -62,7 +62,9 @@ def test_si_ripara_da_solo(impostazioni, meteo, archivio):
         "last_error_message": "Read timeout expired",
     }
     bot, telegram = _bot(impostazioni, meteo, archivio, info)
-    assert bot.controlla_salute() is True
+    assert bot.controlla_salute() is False  # al primo giro aspetta: magari si smaltisce
+    assert telegram.webhook_impostati == []
+    assert bot.controlla_salute() is True  # ancora bloccata 15 minuti dopo: si ripara
     assert telegram.webhook_impostati == [(info["url"], "segreto-webhook")]
     assert "Mi ero inceppata" in telegram.ultimo and "4 messaggi" in telegram.ultimo
 

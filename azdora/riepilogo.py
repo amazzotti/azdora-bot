@@ -172,7 +172,7 @@ def riepilogo_oggi(
 ) -> str:
     oggi = adesso.date()
     titolo = (
-        f"☀️ <b>{saluto(adesso)} {nome}!</b>\nOggi è {data_lunga(oggi)}."
+        f"☀️ <b>{saluto(adesso)} {escape(nome)}!</b>\nOggi è {data_lunga(oggi)}."
         if nome
         else f"☀️ <b>Oggi, {data_lunga(oggi)}</b>"
     )
