@@ -1,7 +1,7 @@
 """Orari personali, riassunti delle notizie, avvisi "sta per piovere" e posizione dal telefono."""
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, time, timedelta
 
 import httpx
@@ -41,7 +41,7 @@ def alle(h, m=0, giorni=0):
 def test_orari_predefiniti_e_serializzazione():
     orari = Orari()
     assert orari.mattino == time(7) and orari.sera == time(20)
-    assert orari.notizie == (time(12, 30), time(19))
+    assert orari.notizie == tuple(time(h) for h in range(8, 23))  # ogni ora
     assert Orari.da_dizionario(orari.in_dizionario()) == orari
     spento = Orari(mattino=None, silenzio_da=None, silenzio_a=None)
     assert Orari.da_dizionario(spento.in_dizionario()) == spento
@@ -108,7 +108,9 @@ def test_in_orario_e_silenzio():
 
 def test_messaggio_orari():
     testo = messaggio(Orari())
-    assert "07:00" in testo and "12:30, 19:00" in testo and "23:00–07:00" in testo
+    assert "07:00" in testo and "ogni ora, dalle 8 alle 22" in testo and "23:00–07:00" in testo
+    assert "12:30, 19:00" in messaggio(Orari(notizie=(time(12, 30), time(19))))
+    assert modifica(Orari(notizie=()), ["notizie", "ogni", "ora"]).notizie == Orari().notizie
     assert "subito" in messaggio(Orari(notizie_subito=True))
     assert "spente" in messaggio(Orari(notizie=()))
     gruppo = messaggio(Orari(), per_gruppo=True)
@@ -287,7 +289,8 @@ def test_mattino_con_promemoria_di_oggi(bot, messaggero, orologio):
     )
 
 
-def test_riassunto_notizie_agli_orari_e_completo(bot, messaggero, orologio, notizie):
+def test_riassunto_notizie_agli_orari_e_completo(bot, messaggero, archivio, orologio, notizie):
+    PreferenzeOrari(archivio).salva(PADRONE, Orari(notizie=(time(12, 30), time(19))))
     orologio.adesso = alle(12, 40)
     assert bot.controlla_notizie() == 4  # tutte in un messaggio solo
     testo = messaggero.ultimo
@@ -447,3 +450,16 @@ def test_impostazioni_indirizzo():
     env = {"VERCEL_PROJECT_PRODUCTION_URL": "azdora-bot.vercel.app"}
     assert Impostazioni.da_env(env).indirizzo == "https://azdora-bot.vercel.app"
     assert Impostazioni.da_env({}).indirizzo == ""
+
+
+def test_vecchio_orario_predefinito_delle_notizie_diventa_ogni_ora(archivio):
+    vecchio = {"mattino": "06:30", "sera": "20:00", "notizie": ["12:30", "19:00"]}
+    archivio.scrivi(f"orari:{PADRONE}", vecchio)
+    orari = PreferenzeOrari(archivio).di(PADRONE)
+    assert orari.notizie == Orari().notizie and orari.mattino == time(6, 30)
+    # Chi invece sceglie 12:30 e 19 adesso, se li tiene.
+    PreferenzeOrari(archivio).salva(PADRONE, replace(orari, notizie=(time(12, 30), time(19))))
+    assert PreferenzeOrari(archivio).di(PADRONE).notizie == (time(12, 30), time(19))
+    # Notizie spente restano spente; senza la voce si usa l'orario predefinito.
+    assert Orari.da_dizionario({"notizie": []}).notizie == ()
+    assert Orari.da_dizionario({}).notizie == Orari().notizie

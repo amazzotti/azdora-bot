@@ -8,6 +8,7 @@ si sostituiscono con dei finti e nel simulatore con la console.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 import os
 from collections.abc import Callable
@@ -1046,6 +1047,7 @@ class Azdora:
     def controlli(self) -> None:
         """Il giro di controlli periodico: promemoria, allerte, notizie e (alle 20) la sera."""
         for controllo in (
+            self.controlla_menu,
             self.controlla_salute,
             self.controlla_promemoria,
             self.controlla_mattino,
@@ -1658,3 +1660,16 @@ class Azdora:
             else:
                 righe.append("✅ Nessun errore recente")
         self.messaggero.invia_messaggio(chat.id, "\n".join(righe))
+
+    def controlla_menu(self) -> bool:
+        """Se l'elenco dei comandi è cambiato (nuova versione), aggiorna il menu di Telegram."""
+        imposta = getattr(self.messaggero, "imposta_comandi", None)
+        if imposta is None or not self.archivio.persistente:
+            return False
+        impronta = hashlib.sha256(repr(COMANDI).encode("utf-8")).hexdigest()[:16]
+        if self.archivio.leggi("menu-comandi") == impronta:
+            return False
+        imposta(COMANDI)
+        self.archivio.scrivi("menu-comandi", impronta)
+        log.info("Menu dei comandi aggiornato (%s comandi)", len(COMANDI))
+        return True

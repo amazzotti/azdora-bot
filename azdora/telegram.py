@@ -6,7 +6,9 @@ così il codice gira uguale su Vercel, su GitHub Actions e in locale.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
+from html import escape, unescape
 from typing import Any, Protocol
 
 import httpx
@@ -15,6 +17,53 @@ URL_API = "https://api.telegram.org"
 
 # Telegram rifiuta i messaggi più lunghi di 4096 caratteri.
 LUNGHEZZA_MASSIMA = 4096
+# Si resta un po' sotto il limite, per sicurezza.
+LUNGHEZZA_PARTE = 3800
+_TAG = re.compile(r"<[^>]+>")
+
+
+def testo_visibile(testo: str) -> str:
+    """Il testo come lo vede chi legge: senza tag HTML e senza gli indirizzi dei link.
+
+    Telegram conta questo per il limite di 4096 caratteri, non l'HTML: i link di Google
+    News sono lunghissimi ma non contano.
+    """
+    return unescape(_TAG.sub("", testo))
+
+
+def dividi(testo: str, limite: int = LUNGHEZZA_PARTE) -> list[str]:
+    """Divide un messaggio troppo lungo in più parti, sempre a fine riga (i tag dei
+    messaggi dell'Azdora non vanno mai a capo, quindi nessun tag resta spezzato)."""
+    if len(testo_visibile(testo)) <= limite:
+        return [testo]
+    parti: list[str] = []
+    attuale: list[str] = []
+    lunghezza = 0
+    for riga in _righe_corte(testo.split("\n"), limite):
+        quanto = len(testo_visibile(riga)) + 1
+        if attuale and lunghezza + quanto > limite:
+            parti.append("\n".join(attuale).strip("\n"))
+            attuale, lunghezza = [], 0
+        attuale.append(riga)
+        lunghezza += quanto
+    if attuale:
+        parti.append("\n".join(attuale).strip("\n"))
+    return [p for p in parti if p.strip()]
+
+
+def _righe_corte(righe: list[str], limite: int) -> list[str]:
+    """Una riga da sola più lunga del limite (succede solo con testo scritto da qualcuno,
+    es. una nota lunghissima) viene tagliata a pezzi come testo semplice, senza tag."""
+    risultato: list[str] = []
+    for riga in righe:
+        visibile = testo_visibile(riga)
+        if len(visibile) <= limite:
+            risultato.append(riga)
+            continue
+        risultato += [
+            escape(visibile[i : i + limite], quote=False) for i in range(0, len(visibile), limite)
+        ]
+    return risultato
 
 
 class ErroreTelegram(RuntimeError):
@@ -71,16 +120,29 @@ class Telegram:
     def invia_messaggio(
         self, chat_id: int, testo: str, tastiera: dict[str, Any] | None = None
     ) -> None:
-        """Manda un messaggio HTML; ``tastiera`` è un ``reply_markup`` della Bot API."""
-        parametri: dict[str, Any] = {
-            "chat_id": chat_id,
-            "text": testo[:LUNGHEZZA_MASSIMA],
-            "parse_mode": "HTML",
-            "link_preview_options": {"is_disabled": True},
-        }
-        if tastiera is not None:
-            parametri["reply_markup"] = tastiera
-        self.chiama("sendMessage", **parametri)
+        """Manda un messaggio HTML; ``tastiera`` è un ``reply_markup`` della Bot API.
+
+        Se è troppo lungo lo divide in più messaggi (la tastiera va sull'ultimo). Se Telegram
+        rifiuta l'HTML, lo rimanda come testo semplice: meglio brutto che niente.
+        """
+        parti = dividi(testo)
+        for numero, parte in enumerate(parti):
+            parametri: dict[str, Any] = {
+                "chat_id": chat_id,
+                "text": parte,
+                "parse_mode": "HTML",
+                "link_preview_options": {"is_disabled": True},
+            }
+            if tastiera is not None and numero == len(parti) - 1:
+                parametri["reply_markup"] = tastiera
+            try:
+                self.chiama("sendMessage", **parametri)
+            except ErroreTelegram as errore:
+                if "can't parse entities" not in str(errore).lower():
+                    raise
+                del parametri["parse_mode"]
+                parametri["text"] = testo_visibile(parte)[:LUNGHEZZA_MASSIMA]
+                self.chiama("sendMessage", **parametri)
 
     def esci_da_chat(self, chat_id: int) -> None:
         self.chiama("leaveChat", chat_id=chat_id)
@@ -97,7 +159,7 @@ class Telegram:
         parametri: dict[str, Any] = {
             "chat_id": chat_id,
             "message_id": id_messaggio,
-            "text": testo[:LUNGHEZZA_MASSIMA],
+            "text": dividi(testo)[0],
             "parse_mode": "HTML",
             "link_preview_options": {"is_disabled": True},
         }

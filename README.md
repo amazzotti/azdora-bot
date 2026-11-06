@@ -73,9 +73,11 @@ Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `s
 In più, da sola, **agli orari che scegli con `/orari`**:
 - **ogni mattina** (di default alle 7) l'Azdora manda il riepilogo della giornata, con in fondo i **promemoria di oggi** e le **prime notizie**. Se sei lontano da casa, aggiunge il meteo di dove sei; se ci sono allerte, le mette in fondo. Poi arrivano i **promemoria delle scadenze**: 30, 7 e 1 giorno prima, il giorno stesso, e se sono scadute e non pagate. Il **1° del mese** arriva anche il **resoconto delle spese** del mese prima;
 - **ogni 15 minuti** consegna i **promemoria** arrivati all'ora giusta, controlla le **allerte** della tua regione e ti avvisa se **sta per piovere**, se arriva un **temporale**, la **neve** o **raffiche** forti nelle prossime 2 ore, dove sei tu (previsioni a 15 minuti di Open-Meteo, lo stesso avviso al massimo ogni 4 ore);
-- **le notizie** arrivano in un **riassunto completo** diviso per città (fino a 10, la tua per prima, più le principali di Italia e mondo) alle 12:30 e alle 19, oppure una per volta appena escono, se scegli `/orari notizie subito`. Non ti manda mai due volte la stessa cosa;
+- **le notizie** arrivano in un **riassunto completo** diviso per città (fino a 10, la tua per prima, più le principali di Italia e mondo) **ogni ora, dalle 8 alle 22**, solo se c'è qualcosa di nuovo. Puoi scegliere orari tuoi (`/orari notizie 8 13 19`) o riceverle una per volta appena escono (`/orari notizie subito`). Non ti manda mai due volte la stessa cosa;
 - nelle **ore di silenzio** (di default 23–7) niente notizie né avvisi: passano solo i promemoria e le allerte arancioni e rosse;
 - **la sera** (di default alle 20) ti ricorda i **rifiuti** da portare fuori e, se hai attivato `/sera`, ti manda il riepilogo di domani.
+
+**Messaggi lunghi e menu sempre aggiornati.** Telegram accetta al massimo 4096 caratteri per messaggio: se un riepilogo è più lungo, l'Azdora lo divide a fine riga in più messaggi, senza mai spezzare un link. Se Telegram rifiutasse la formattazione, lo rimanda come testo semplice: meglio brutto che niente. Quando escono comandi nuovi, il menu `/` di Telegram si aggiorna da solo al giro successivo della sveglia.
 
 **Chi decide quando arrivano?** La sveglia di cron-job.org chiama il bot ogni 15 minuti. A ogni giro il bot guarda gli orari di ognuno e manda solo quello che è arrivato il momento di mandare, una volta sola. Il cronjob delle 7 (`job=mattino`) può restare: rispetta comunque gli orari di `/orari`.
 

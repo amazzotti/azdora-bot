@@ -19,13 +19,17 @@ from azdora.archivio import Archivio
 # meglio niente riepilogo del mattino che un "Buongiorno" alle tre del pomeriggio.
 FINESTRA = timedelta(hours=3)
 FINESTRA_NOTIZIE = timedelta(hours=1)
+# Fino alla versione 1 il riassunto delle notizie era alle 12:30 e alle 19: chi non l'ha
+# mai cambiato passa da solo a "ogni ora", chi l'ha scelto a mano lo tiene.
+VERSIONE = 2
+_VECCHIE_NOTIZIE = ["12:30", "19:00"]
 
 
 @dataclass(frozen=True)
 class Orari:
     mattino: time | None = time(7, 0)
     sera: time = time(20, 0)
-    notizie: tuple[time, ...] = (time(12, 30), time(19, 0))
+    notizie: tuple[time, ...] = tuple(time(h) for h in range(8, 23))  # ogni ora, 8–22
     notizie_subito: bool = False
     silenzio_da: time | None = time(23, 0)
     silenzio_a: time | None = time(7, 0)
@@ -43,6 +47,7 @@ class Orari:
             "silenzio_da": hhmm(self.silenzio_da),
             "silenzio_a": hhmm(self.silenzio_a),
             "avvisi_meteo": self.avvisi_meteo,
+            "versione": VERSIONE,
         }
 
     @classmethod
@@ -51,10 +56,15 @@ class Orari:
             return None if not valore else time.fromisoformat(valore)
 
         base = cls()
+        notizie = dati.get("notizie")
+        if notizie is None or (dati.get("versione", 1) < 2 and notizie == _VECCHIE_NOTIZIE):
+            orari_notizie = base.notizie
+        else:
+            orari_notizie = tuple(t for v in notizie if (t := ora(v)))
         return cls(
             mattino=ora(dati["mattino"]) if "mattino" in dati else base.mattino,
             sera=ora(dati.get("sera")) or base.sera,
-            notizie=tuple(t for v in dati.get("notizie", []) if (t := ora(v))),
+            notizie=orari_notizie,
             notizie_subito=bool(dati.get("notizie_subito", False)),
             silenzio_da=ora(dati.get("silenzio_da")),
             silenzio_a=ora(dati.get("silenzio_a")),
@@ -124,6 +134,8 @@ def modifica(orari: Orari, argomenti: Sequence[str]) -> Orari:
     if voce == "notizie":
         if testo == "subito":
             return replace(orari, notizie_subito=True)
+        if testo in {"ogni ora", "orario", "ore"}:
+            return replace(orari, notizie=Orari().notizie, notizie_subito=False)
         if testo in _NO:
             return replace(orari, notizie=(), notizie_subito=False)
         if not valori:
@@ -159,6 +171,8 @@ def messaggio(orari: Orari, per_gruppo: bool = False) -> str:
     if not per_gruppo:
         if orari.notizie_subito:
             notizie = "<b>subito</b>, appena escono (solo il tuo comune)"
+        elif orari.notizie == Orari().notizie:
+            notizie = "riassunto <b>ogni ora, dalle 8 alle 22</b>"
         elif orari.notizie:
             notizie = "riassunto alle <b>" + ", ".join(_hhmm(t) for t in orari.notizie) + "</b>"
         else:
@@ -182,7 +196,8 @@ USO = (
     "Per cambiarli:\n"
     "<code>/orari mattino 6:30</code> · <code>/orari mattino off</code>\n"
     "<code>/orari sera 21</code>\n"
-    "<code>/orari notizie 8 13 19</code> · <code>/orari notizie subito</code> · "
+    "<code>/orari notizie ogni ora</code> · <code>/orari notizie 8 13 19</code> · "
+    "<code>/orari notizie subito</code> · "
     "<code>/orari notizie off</code>\n"
     "<code>/orari silenzio 23-7</code> · <code>/orari silenzio off</code>\n"
     "<code>/orari avvisi off</code>"

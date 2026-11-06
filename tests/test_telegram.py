@@ -5,6 +5,7 @@ import pytest
 import respx
 
 from azdora.telegram import LUNGHEZZA_MASSIMA, ErroreTelegram, Telegram
+from azdora.telegram import testo_visibile as visibile
 
 TOKEN = "123:segretissimo"
 BASE = f"https://api.telegram.org/bot{TOKEN}"
@@ -47,10 +48,40 @@ def test_invia_messaggio_con_tastiera(telegram):
 
 
 @respx.mock
-def test_messaggi_troppo_lunghi_vengono_tagliati(telegram):
+def test_messaggi_troppo_lunghi_divisi_a_fine_riga(telegram):
     rotta = respx.post(f"{BASE}/sendMessage").mock(return_value=_ok())
-    telegram.invia_messaggio(42, "x" * 5000)
-    assert len(json.loads(rotta.calls.last.request.content)["text"]) == LUNGHEZZA_MASSIMA
+    link = "https://news.google.com/" + "x" * 300
+    righe = [f'<b>{i}</b> <a href="{link}">titolo {i}</a>' for i in range(400)]
+    telegram.invia_messaggio(42, "\n".join(righe), {"inline_keyboard": []})
+    inviati = [json.loads(c.request.content) for c in rotta.calls]
+    assert len(inviati) > 1
+    for parte in inviati:
+        assert len(visibile(parte["text"])) <= LUNGHEZZA_MASSIMA
+        assert parte["text"].count("<a ") == parte["text"].count("</a>")  # nessun link spezzato
+    assert "reply_markup" in inviati[-1] and "reply_markup" not in inviati[0]
+
+
+@respx.mock
+def test_messaggi_corti_con_link_lunghi_non_vengono_toccati(telegram):
+    rotta = respx.post(f"{BASE}/sendMessage").mock(return_value=_ok())
+    link = "https://news.google.com/" + "y" * 500
+    testo = "\n".join(f'<a href="{link}">notizia {i}</a>' for i in range(12))
+    telegram.invia_messaggio(42, testo)  # 6000 caratteri di HTML, ma pochi visibili
+    assert rotta.call_count == 1
+    assert json.loads(rotta.calls.last.request.content)["text"] == testo
+
+
+@respx.mock
+def test_html_rifiutato_si_rimanda_come_testo(telegram):
+    rotta = respx.post(f"{BASE}/sendMessage").mock(
+        side_effect=[
+            httpx.Response(400, json={"ok": False, "description": "can't parse entities"}),
+            httpx.Response(200, json={"ok": True, "result": {}}),
+        ]
+    )
+    telegram.invia_messaggio(42, "<b>ciao &amp; buongiorno")
+    seconda = json.loads(rotta.calls.last.request.content)
+    assert seconda["text"] == "ciao & buongiorno" and "parse_mode" not in seconda
 
 
 @respx.mock
