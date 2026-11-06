@@ -10,7 +10,7 @@ from azdora.bot import Azdora
 from azdora.config import FUSO_ORARIO
 from azdora.notizie import FONTI_PRINCIPALI, LettoreNotizie, Notizia
 from azdora.orari import Orari, PreferenzeOrari
-from tests.conftest import PADRONE, messaggio
+from tests.conftest import PADRONE, messaggio, zitto_il_gruppo
 
 ADESSO = datetime(2026, 11, 5, 19, 45, tzinfo=FUSO_ORARIO)
 
@@ -97,6 +97,7 @@ def test_notizie_locali_con_italia_e_mondo_in_coda(impostazioni, messaggero, met
 
 
 def test_riassunto_con_italia_e_mondo_senza_ripetizioni(impostazioni, messaggero, meteo, archivio):
+    zitto_il_gruppo(archivio)
     PreferenzeOrari(archivio).salva(
         PADRONE, Orari(notizie=(time(19, 30),), silenzio_da=None, silenzio_a=None)
     )
@@ -186,6 +187,7 @@ def test_sono_nuovi_non_segna():
 
 
 def test_le_notizie_non_mostrate_restano_per_dopo(impostazioni, messaggero, meteo, archivio):
+    zitto_il_gruppo(archivio)
     from azdora.bot import Azdora
 
     class TanteNotizie(FonteFinta):

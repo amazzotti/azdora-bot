@@ -8,7 +8,7 @@ ognuno e manda quello che è arrivato il momento di mandare, una volta sola.
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta
 from typing import Any
@@ -21,7 +21,7 @@ FINESTRA = timedelta(hours=3)
 FINESTRA_NOTIZIE = timedelta(hours=1)
 # Fino alla versione 1 il riassunto delle notizie era alle 12:30 e alle 19: chi non l'ha
 # mai cambiato passa da solo a "ogni ora", chi l'ha scelto a mano lo tiene.
-VERSIONE = 2
+VERSIONE = 3
 _VECCHIE_NOTIZIE = ["12:30", "19:00"]
 
 
@@ -34,6 +34,7 @@ class Orari:
     silenzio_da: time | None = time(23, 0)
     silenzio_a: time | None = time(7, 0)
     avvisi_meteo: bool = True
+    allerte: bool = True  # allerte ufficiali (Meteoalarm / Protezione civile)
 
     def in_dizionario(self) -> dict[str, Any]:
         def hhmm(t: time | None) -> str | None:
@@ -47,6 +48,7 @@ class Orari:
             "silenzio_da": hhmm(self.silenzio_da),
             "silenzio_a": hhmm(self.silenzio_a),
             "avvisi_meteo": self.avvisi_meteo,
+            "allerte": self.allerte,
             "versione": VERSIONE,
         }
 
@@ -69,6 +71,7 @@ class Orari:
             silenzio_da=ora(dati.get("silenzio_da")),
             silenzio_a=ora(dati.get("silenzio_a")),
             avvisi_meteo=bool(dati.get("avvisi_meteo", True)),
+            allerte=bool(dati.get("allerte", True)),
         )
 
 
@@ -89,13 +92,27 @@ def in_silenzio(orari: Orari, adesso: datetime) -> bool:
     return ora >= da or ora < a
 
 
+# Nei gruppi notizie e avvisi partono spenti: arrivano già nella chat privata, e tre
+# notifiche uguali sono troppe. Si accendono dal gruppo con /orari.
+ORARI_GRUPPO = Orari(notizie=(), avvisi_meteo=False, allerte=False)
+
+
 class PreferenzeOrari:
-    def __init__(self, archivio: Archivio) -> None:
+    def __init__(self, archivio: Archivio, gruppi: Collection[int] = ()) -> None:
         self._archivio = archivio
+        self._gruppi = frozenset(gruppi)
 
     def di(self, chat_id: int) -> Orari:
         dati = self._archivio.leggi(f"orari:{chat_id}")
-        return Orari.da_dizionario(dati) if dati else Orari()
+        if chat_id not in self._gruppi:
+            return Orari.da_dizionario(dati) if dati else Orari()
+        if not dati:
+            return ORARI_GRUPPO
+        orari = Orari.da_dizionario(dati)
+        if dati.get("versione", 1) < 3:
+            # Salvati prima che i gruppi ricevessero notizie e avvisi: restano spenti.
+            orari = replace(orari, notizie=(), avvisi_meteo=False, allerte=False)
+        return orari
 
     def salva(self, chat_id: int, orari: Orari) -> None:
         self._archivio.scrivi(f"orari:{chat_id}", orari.in_dizionario())
@@ -150,6 +167,12 @@ def modifica(orari: Orari, argomenti: Sequence[str]) -> Orari:
         if len(parti) != 2:
             raise ErroreOrari("Scrivi le ore di silenzio così: /orari silenzio 23-7")
         return replace(orari, silenzio_da=leggi_ora(parti[0]), silenzio_a=leggi_ora(parti[1]))
+    if voce in {"allerte", "allerta"}:
+        if testo in _SI:
+            return replace(orari, allerte=True)
+        if testo in _NO:
+            return replace(orari, allerte=False)
+        raise ErroreOrari("Scrivi /orari allerte on oppure /orari allerte off")
     if voce in {"avvisi", "pioggia", "meteo"}:
         if testo in _SI:
             return replace(orari, avvisi_meteo=True)
@@ -164,30 +187,30 @@ def _hhmm(t: time | None) -> str:
 
 
 def messaggio(orari: Orari, per_gruppo: bool = False) -> str:
-    righe = ["🕰️ <b>I tuoi orari</b>", ""]
+    righe = ["🕰️ <b>Gli orari di questo gruppo</b>" if per_gruppo else "🕰️ <b>I tuoi orari</b>", ""]
     if not per_gruppo:
         righe.append(f"☀️ Riepilogo del mattino: <b>{_hhmm(orari.mattino)}</b>")
     righe.append(f"🌙 Sera (rifiuti e, se attivo, /sera): <b>{_hhmm(orari.sera)}</b>")
-    if not per_gruppo:
-        if orari.notizie_subito:
-            notizie = "<b>subito</b>, appena escono (solo il tuo comune)"
-        elif orari.notizie == Orari().notizie:
-            notizie = "riassunto <b>ogni ora, dalle 8 alle 22</b>"
-        elif orari.notizie:
-            notizie = "riassunto alle <b>" + ", ".join(_hhmm(t) for t in orari.notizie) + "</b>"
-        else:
-            notizie = "<b>spente</b> (le trovi sempre con /notizie)"
-        righe.append(f"🗞️ Notizie: {notizie}")
-        silenzio = (
-            f"<b>{_hhmm(orari.silenzio_da)}–{_hhmm(orari.silenzio_a)}</b>"
-            if orari.silenzio_da
-            else "<b>mai</b>"
-        )
-        righe.append(f"🤫 Silenzio: {silenzio} (i promemoria arrivano lo stesso)")
-        righe.append(
-            "☔ Avvisi pioggia, temporali, raffiche: "
-            + ("<b>attivi</b>" if orari.avvisi_meteo else "<b>spenti</b>")
-        )
+    if orari.notizie_subito:
+        notizie = "<b>subito</b>, appena escono (solo il tuo comune)"
+    elif orari.notizie == Orari().notizie:
+        notizie = "riassunto <b>ogni ora, dalle 8 alle 22</b>"
+    elif orari.notizie:
+        notizie = "riassunto alle <b>" + ", ".join(_hhmm(t) for t in orari.notizie) + "</b>"
+    else:
+        notizie = "<b>spente</b> (le trovi sempre con /notizie)"
+    righe.append(f"🗞️ Notizie: {notizie}")
+    silenzio = (
+        f"<b>{_hhmm(orari.silenzio_da)}–{_hhmm(orari.silenzio_a)}</b>"
+        if orari.silenzio_da
+        else "<b>mai</b>"
+    )
+    righe.append(f"🤫 Silenzio: {silenzio} (i promemoria arrivano lo stesso)")
+    righe.append(
+        "☔ Avvisi pioggia, temporali, raffiche: "
+        + ("<b>attivi</b>" if orari.avvisi_meteo else "<b>spenti</b>")
+    )
+    righe.append("⚠️ Allerte ufficiali: " + ("<b>attive</b>" if orari.allerte else "<b>spente</b>"))
     righe += ["", USO_GRUPPO if per_gruppo else USO]
     return "\n".join(righe)
 
@@ -200,6 +223,15 @@ USO = (
     "<code>/orari notizie subito</code> · "
     "<code>/orari notizie off</code>\n"
     "<code>/orari silenzio 23-7</code> · <code>/orari silenzio off</code>\n"
-    "<code>/orari avvisi off</code>"
+    "<code>/orari avvisi off</code> · <code>/orari allerte off</code>"
 )
-USO_GRUPPO = "Per cambiarlo: <code>/orari sera 21</code>"
+USO_GRUPPO = (
+    "Notizie e avvisi possono arrivare anche qui (di partenza sono spenti, per non "
+    "ripetere quelli della chat privata). Valgono per la posizione condivisa nel gruppo "
+    "o, se manca, per la tua. Per accenderli:\n"
+    "<code>/orari notizie ogni ora</code> · <code>/orari notizie 8 13 19</code>\n"
+    "<code>/orari avvisi on</code> · <code>/orari allerte on</code>\n"
+    "Per spegnerli: <code>/orari notizie off</code> · <code>/orari avvisi off</code> · "
+    "<code>/orari allerte off</code>\n"
+    "<code>/orari silenzio 22-8</code> · <code>/orari sera 21</code>"
+)

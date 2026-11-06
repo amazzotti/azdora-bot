@@ -162,6 +162,7 @@ PRINCIPALI_IN_CODA = 3
 PRINCIPALI_AL_MATTINO = 2
 PRINCIPALI_A_RICHIESTA = 8
 TEMPO_MASSIMO_CONTROLLI_S = 45
+NOMI_VOCI = {"notizie": "notizie", "avvisi": "avvisi di pioggia", "allerte": "allerte"}
 ORA_SCADENZE = dt_time(8, 0)
 VERIFICA_MENU_S = 6 * 3600  # ogni quanto ricontrollare il menu dei comandi
 ERRORE_RECENTE_S = 3600  # errori di Telegram dell'ultima ora: c'è da riparare
@@ -241,7 +242,7 @@ class Azdora:
         self.aria = aria
         self.carburante = carburante
         self.imminente = imminente
-        self.orari = PreferenzeOrari(self.archivio)
+        self.orari = PreferenzeOrari(self.archivio, impostazioni.gruppi)
         self.orologio = orologio
         # Previsioni già scaricate in questa richiesta: con più persone non si riscarica.
         self._cache_previsioni: dict[tuple[float, float], Any] = {}
@@ -520,9 +521,19 @@ class Azdora:
         return nuova
 
     def zona(self, chat_id: int | None = None) -> Zona:
-        """La zona attuale di una persona (di default il padrone): dove si trova, o casa."""
+        """La zona attuale di una persona (di default il padrone): dove si trova, o casa.
+
+        Per un gruppo: la posizione condivisa nel gruppo, se c'è, altrimenti quella del padrone.
+        """
         chi = chat_id if chat_id is not None else self.impostazioni.chat_personale
-        return self.posizioni.zona(chi, self.orologio())
+        zona = self.posizioni.zona(chi, self.orologio())
+        if (
+            not zona.da_posizione
+            and chi in self.impostazioni.gruppi
+            and self.impostazioni.chat_personale is not None
+        ):
+            return self.posizioni.zona(self.impostazioni.chat_personale, self.orologio())
+        return zona
 
     def _ricorda_nome(self, chat_id: int, nome: str) -> None:
         """Il nome di Telegram dei familiari, per il "Buongiorno" delle 7."""
@@ -1020,7 +1031,10 @@ class Azdora:
             self.messaggero.rispondi_pulsante(id_tocco)
             return
         try:
-            avviso = self._esegui_pulsante(chat_id, id_messaggio, azione, valore)
+            if azione == "orpriv":
+                avviso = self._spegni_in_privato((tocco.get("from") or {}).get("id"), valore)
+            else:
+                avviso = self._esegui_pulsante(chat_id, id_messaggio, azione, valore)
         except (ErroreArchivio, ValueError) as errore:
             log.warning("Pulsante %s non riuscito: %s", azione, errore)
             avviso = "😓 Non ci sono riuscita, riprova"
@@ -1107,13 +1121,22 @@ class Azdora:
             return False
         return True
 
+    def _destinatari(self) -> tuple[int, ...]:
+        """Chi riceve notizie e avvisi: le persone e anche i gruppi (ognuno coi suoi /orari)."""
+        return tuple(dict.fromkeys((*self._persone(), *self.impostazioni.gruppi)))
+
     def _per_ogni_persona(self, controllo: Callable[[int], int]) -> int:
         totale = 0
-        for chat_id in self._persone():
+        for chat_id in self._destinatari():
             try:
                 totale += controllo(chat_id)
             except ErroreTelegram as errore:
                 log.warning("%s non consegnato a %s: %s", controllo.__name__, chat_id, errore)
+            except (ErroreArchivio, ErroreMeteo):
+                raise
+            except Exception:
+                # Un gruppo o una persona con dati strani non deve fermare gli altri.
+                log.exception("%s fallito per %s", controllo.__name__, chat_id)
         return totale
 
     def controlla_notizie(self) -> int:
@@ -1170,8 +1193,11 @@ class Azdora:
         if not zona.regione or not zona.paese:
             return 0
         adesso = self.orologio()
+        orari = self.orari.di(chat_id)
+        if not orari.allerte:
+            return 0
         attive = modulo_allerte.per_regione(self.allerte.allerte(zona.paese), zona.regione, adesso)
-        if in_silenzio(self.orari.di(chat_id), adesso):
+        if in_silenzio(orari, adesso):
             # Di notte si sveglia qualcuno solo per allerte arancioni o rosse.
             attive = [a for a in attive if a.livello >= 3]
         nuove = []
@@ -1706,9 +1732,44 @@ class Azdora:
                 )
                 return
             self.orari.salva(chat.id, orari)
+        tastiera = None
+        voce = comando.argomenti[0].lower() if comando.argomenti else ""
+        acceso = {
+            "notizie": bool(orari.notizie) or orari.notizie_subito,
+            "avvisi": orari.avvisi_meteo,
+            "allerte": orari.allerte,
+        }
+        voce = {"pioggia": "avvisi", "meteo": "avvisi", "allerta": "allerte"}.get(voce, voce)
+        if chat.e_un_gruppo and acceso.get(voce):
+            tastiera = {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": f"🔕 Allora non mandarmi le {NOMI_VOCI[voce]} in privato",
+                            "callback_data": f"orpriv:{voce}",
+                        }
+                    ]
+                ]
+            }
         self.messaggero.invia_messaggio(
-            chat.id, modulo_orari.messaggio(orari, per_gruppo=chat.e_un_gruppo)
+            chat.id, modulo_orari.messaggio(orari, per_gruppo=chat.e_un_gruppo), tastiera
         )
+
+    def _spegni_in_privato(self, persona: int | None, voce: str) -> str:
+        """Pulsante nel gruppo: chi lo tocca smette di ricevere quella cosa in privato."""
+        if persona is None or persona not in self.impostazioni.persone:
+            return "Questo vale solo per chi usa l'Azdora anche in privato"
+        orari = self.orari.di(persona)
+        if voce == "notizie":
+            orari = replace(orari, notizie=(), notizie_subito=False)
+        elif voce == "avvisi":
+            orari = replace(orari, avvisi_meteo=False)
+        elif voce == "allerte":
+            orari = replace(orari, allerte=False)
+        else:
+            return "Non so cosa spegnere"
+        self.orari.salva(persona, orari)
+        return f"🔕 Fatto: le {NOMI_VOCI[voce]} ora arrivano solo qui nel gruppo"
 
     def controlla_mattino(self, anche_senza_memoria: bool = False) -> int:
         """Il riepilogo del mattino, a ognuno all'ora che ha scelto (una volta al giorno)."""
@@ -1842,7 +1903,7 @@ class Azdora:
             return 0
         adesso = self.orologio()
         mandati = 0
-        for chat_id in self._persone():
+        for chat_id in self._destinatari():
             orari = self.orari.di(chat_id)
             if not orari.avvisi_meteo or in_silenzio(orari, adesso):
                 continue

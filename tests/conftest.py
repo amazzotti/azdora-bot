@@ -218,3 +218,10 @@ def messaggio(
             "text": testo,
         },
     }
+
+
+def zitto_il_gruppo(archivio: Any, gruppo: int = COPPIA) -> None:
+    """Nei test che contano notizie e avvisi di una persona: il gruppo non riceve niente."""
+    from azdora.orari import Orari, PreferenzeOrari
+
+    PreferenzeOrari(archivio).salva(gruppo, Orari(notizie=(), avvisi_meteo=False, allerte=False))

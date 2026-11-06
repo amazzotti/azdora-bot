@@ -9,7 +9,16 @@ from azdora.bot import Azdora
 from azdora.config import ConfigurazioneErrata, Impostazioni
 from azdora.spese import RegistroSpese
 from azdora.telegram import ErroreTelegram
-from tests.conftest import ADESSO, BOLOGNA, COPPIA, PADRONE, SCONOSCIUTO, messaggio, posizione
+from tests.conftest import (
+    ADESSO,
+    BOLOGNA,
+    COPPIA,
+    PADRONE,
+    SCONOSCIUTO,
+    messaggio,
+    posizione,
+    zitto_il_gruppo,
+)
 
 BABBO = 333
 FIDANZATA = 444
@@ -176,7 +185,8 @@ def test_controlli_per_ognuno_nella_sua_zona(bot, messaggero, luoghi):
     assert bot.controlla_notizie() == 0  # già mandate, a ognuno le sue
 
 
-def test_allerte_a_ognuno_una_volta(bot, messaggero):
+def test_allerte_a_ognuno_una_volta(bot, messaggero, archivio):
+    zitto_il_gruppo(archivio)
     assert bot.controlla_allerte() == 3
     assert {chat for chat, _ in messaggero.inviati} == {PADRONE, BABBO, FIDANZATA}
     assert bot.controlla_allerte() == 0
@@ -198,6 +208,7 @@ class MessaggeroCheFallisceCon:
 def test_se_qualcuno_blocca_il_bot_gli_altri_ricevono_lo_stesso(
     impostazioni, messaggero, meteo, archivio
 ):
+    zitto_il_gruppo(archivio)
     rotto = MessaggeroCheFallisceCon(messaggero, BABBO)
     bot = Azdora(
         impostazioni,

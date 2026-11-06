@@ -25,7 +25,7 @@ from azdora.orari import (
 from azdora.posizione import MemoriaPosizione
 from azdora.telefono import CollegamentiTelefono, istruzioni
 from azdora.web import gestisci_posizione
-from tests.conftest import COPPIA, PADRONE, carica
+from tests.conftest import COPPIA, PADRONE, carica, zitto_il_gruppo
 from tests.conftest import messaggio as update_messaggio
 
 GIOVEDI = datetime(2026, 11, 5, 0, 0, tzinfo=FUSO_ORARIO)
@@ -304,6 +304,7 @@ def test_mattino_con_promemoria_di_oggi(bot, messaggero, orologio):
 
 
 def test_riassunto_notizie_agli_orari_e_completo(bot, messaggero, archivio, orologio, notizie):
+    zitto_il_gruppo(archivio)
     PreferenzeOrari(archivio).salva(PADRONE, Orari(notizie=(time(12, 30), time(19))))
     orologio.adesso = alle(12, 40)
     assert bot.controlla_notizie() == 4  # tutte in un messaggio solo
@@ -332,6 +333,7 @@ def test_silenzio_ferma_notizie_e_avvisi(bot, messaggero, archivio, orologio, im
 
 
 def test_avviso_pioggia_una_volta_ogni_4_ore(bot, messaggero, archivio, orologio, imminente):
+    zitto_il_gruppo(archivio)
     imminente.risposta = quarti(pioggia=[0, 0, 0.6, 0.6], inizio=alle(15))
     orologio.adesso = alle(15)
     assert bot.controlla_imminente() == 1
@@ -344,6 +346,7 @@ def test_avviso_pioggia_una_volta_ogni_4_ore(bot, messaggero, archivio, orologio
 
 
 def test_avvisi_meteo_spenti(bot, archivio, orologio, imminente):
+    zitto_il_gruppo(archivio)
     PreferenzeOrari(archivio).salva(PADRONE, Orari(avvisi_meteo=False))
     imminente.risposta = quarti(pioggia=[0, 0.6], inizio=alle(15))
     orologio.adesso = alle(15)
@@ -351,6 +354,7 @@ def test_avvisi_meteo_spenti(bot, archivio, orologio, imminente):
 
 
 def test_allerte_di_notte_solo_gravi(impostazioni, messaggero, meteo, archivio):
+    zitto_il_gruppo(archivio)
     from azdora.allerte import Allerta
 
     class Fonte:

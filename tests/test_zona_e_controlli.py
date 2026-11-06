@@ -19,6 +19,7 @@ from tests.conftest import (
     SCONOSCIUTO,
     messaggio,
     posizione,
+    zitto_il_gruppo,
 )
 
 MISANO_XY = (43.978, 12.697)
@@ -310,7 +311,10 @@ def test_comando_allerte_senza_fonte(impostazioni, messaggero, meteo):
     assert messaggero.ultimo == messaggi.ALLERTE_NON_DISPONIBILI
 
 
-def test_controllo_allerte_una_volta_sola_e_quando_sale_di_livello(bot, messaggero, allerte):
+def test_controllo_allerte_una_volta_sola_e_quando_sale_di_livello(
+    bot, messaggero, allerte, archivio
+):
+    zitto_il_gruppo(archivio)
     allerte.allerte_attive = [allerta(2)]
     assert bot.controlla_allerte() == 1
     assert "Allerta gialla" in messaggero.ultimo
@@ -320,7 +324,8 @@ def test_controllo_allerte_una_volta_sola_e_quando_sale_di_livello(bot, messagge
     assert "Allerta arancione" in messaggero.ultimo
 
 
-def test_controllo_allerte_segue_la_regione(bot, allerte, luoghi):
+def test_controllo_allerte_segue_la_regione(bot, allerte, luoghi, archivio):
+    zitto_il_gruppo(archivio)
     allerte.allerte_attive = [allerta(3, regione="Lombardia")]
     assert bot.controlla_allerte() == 0
     luoghi.luogo = luoghi.luogo.__class__("Milano", "MI", "Lombardia", "it", "Italia")
