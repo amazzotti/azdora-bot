@@ -24,6 +24,7 @@ import httpx
 from azdora import allerte as modulo_allerte
 from azdora import budget as modulo_budget
 from azdora import carburante as modulo_carburante
+from azdora import compleanni as modulo_compleanni
 from azdora import conti as modulo_conti
 from azdora import costa as modulo_costa
 from azdora import feste as modulo_feste
@@ -42,6 +43,7 @@ from azdora.allerte import FonteAllerte
 from azdora.archivio import Archivio, ArchivioMemoria, ErroreArchivio
 from azdora.budget import Budget, leggi_budget
 from azdora.carburante import CARBURANTI, FonteCarburante
+from azdora.compleanni import RegistroCompleanni, leggi_compleanno
 from azdora.config import (
     FUSO_ORARIO,
     LOCALITA,
@@ -127,6 +129,7 @@ COMANDI: tuple[tuple[str, str], ...] = (
     ("budget", "Budget mensile: /budget 800 o /budget auto 150"),
     ("conti", "Nel gruppo: chi deve quanto a chi"),
     ("pareggio", "Nel gruppo: siamo pari, si riparte da zero"),
+    ("compleanni", "I compleanni segnati (aggiungi: /compleanno Giulia 2 maggio)"),
     ("posto", "Salva dove sei (casa, lavoro…) per i promemoria «quando arrivo»"),
     ("promemoria", "I tuoi promemoria"),
     ("ricordami", "Es. /ricordami domani alle 18 di chiamare"),
@@ -268,6 +271,8 @@ class Azdora:
             "lista": self._lista,
             "fissa": self._fissa_lista,
             "posto": self._posto,
+            "compleanno": self._compleanno,
+            "compleanni": self._compleanni,
             "posti": self._posto,
             "aggiungi": self._aggiungi,
             "svuota": self._svuota,
@@ -727,11 +732,20 @@ class Azdora:
                 (nuovo,) = self.archivio.segna_nuovi([chiave], 2 * 24 * 3600)
                 if not nuovo:
                     continue
-                self.invia_promemoria_scadenze(chat)
-                if oggi.day == 1:
-                    self.invia_resoconto_mese_scorso(chat)
-            except (ErroreArchivio, ErroreTelegram) as errore:
+            except ErroreArchivio as errore:
                 log.warning("Promemoria e resoconto saltati per %s: %s", chat, errore)
+                continue
+            # Ognuno per conto suo: se uno si rompe, gli altri arrivano lo stesso.
+            invii = [self.invia_promemoria_scadenze, self.invia_compleanni]
+            if oggi.day == 1:
+                invii.append(self.invia_resoconto_mese_scorso)
+            for invia in invii:
+                try:
+                    invia(chat)
+                except (ErroreArchivio, ErroreTelegram) as errore:
+                    log.warning("%s saltato per %s: %s", invia.__name__, chat, errore)
+                except Exception:
+                    log.exception("%s fallito per %s", invia.__name__, chat)
 
     def controlla_scadenze(self) -> None:
         """Le scadenze arrivano anche a chi ha spento il riepilogo del mattino (dalle 8)."""
@@ -1064,6 +1078,14 @@ class Azdora:
                 )
             self._aggiorna_lista_fissata(chat_id, voci, gia_fatto=id_messaggio)
             return None
+        if azione == "cpdel":
+            tolto = RegistroCompleanni(self.archivio, chat_id).elimina(int(valore))
+            if id_messaggio is not None:
+                testo, tastiera = self._testo_compleanni(chat_id)
+                self.messaggero.modifica_messaggio(
+                    chat_id, id_messaggio, testo, tastiera or {"inline_keyboard": []}
+                )
+            return f"🗑 Tolto: {tolto.nome}" if tolto else None
         if azione in {"pldel", "plrip"}:
             return self._pulsante_posto(chat_id, id_messaggio, azione, valore)
         return None
@@ -1203,6 +1225,13 @@ class Azdora:
         Nei gruppi la gente chiacchiera: lì si capiscono solo le frasi che iniziano con
         "spesa" o "ricordami", per non scambiare un messaggio qualsiasi per una spesa.
         """
+        # Nei gruppi si chiacchiera ("il compleanno di Giulia è il 2 maggio"): lì solo se
+        # la frase inizia con "ricordami".
+        if (not chat.e_un_gruppo or e_un_promemoria(testo)) and (
+            letto := leggi_compleanno(testo)
+        ) is not None:
+            self._segna_compleanno(chat, *letto)
+            return
         if (richiesta := modulo_posti.leggi_richiesta(testo)) is not None:
             self._crea_promemoria_luogo(chat, richiesta, chi_id)
             return
@@ -1305,6 +1334,9 @@ class Azdora:
             self.messaggero.invia_messaggio(chat.id, modulo_promemoria.USO)
             return
         frase = f"ricordami {comando.testo_argomenti}"
+        if (letto := leggi_compleanno(frase)) is not None:
+            self._segna_compleanno(chat, *letto)
+            return
         if (richiesta := modulo_posti.leggi_richiesta(frase)) is not None:
             self._crea_promemoria_luogo(chat, richiesta, comando.mittente_id)
             return
@@ -1326,6 +1358,45 @@ class Azdora:
         righe = (modulo_promemoria.pulsanti(voci) or {}).get("inline_keyboard", [])
         righe = [*righe, *modulo_posti.pulsanti_elenco(persona, posti)]
         return testo, {"inline_keyboard": righe} if righe else None
+
+    # --- Compleanni --------------------------------------------------------------------
+
+    def _compleanno(self, chat: Chat, comando: Comando) -> None:
+        letto = leggi_compleanno(f"compleanno {comando.testo_argomenti}")
+        if letto is None:
+            self.messaggero.invia_messaggio(chat.id, modulo_compleanni.USO)
+            return
+        self._segna_compleanno(chat, *letto)
+
+    def _segna_compleanno(
+        self, chat: Chat, nome: str, giorno: int, mese: int, anno: int | None
+    ) -> None:
+        try:
+            voce = RegistroCompleanni(self.archivio, chat.id).aggiungi(nome, giorno, mese, anno)
+        except ValueError as errore:
+            self.messaggero.invia_messaggio(chat.id, f"🤔 {escape(str(errore))}.")
+            return
+        self.messaggero.invia_messaggio(
+            chat.id, modulo_compleanni.conferma(voce, self._oggi_data())
+        )
+
+    def _compleanni(self, chat: Chat, comando: Comando) -> None:
+        if comando.argomenti:
+            self._compleanno(chat, comando)
+            return
+        self.messaggero.invia_messaggio(chat.id, *self._testo_compleanni(chat.id))
+
+    def _testo_compleanni(self, chat_id: int) -> tuple[str, dict[str, Any] | None]:
+        voci = RegistroCompleanni(self.archivio, chat_id).tutti()
+        oggi = self._oggi_data()
+        return modulo_compleanni.elenco(voci, oggi), modulo_compleanni.pulsanti(voci, oggi)
+
+    def invia_compleanni(self, chat_id: int) -> int:
+        oggi = self._oggi_data()
+        da_dire = RegistroCompleanni(self.archivio, chat_id).da_ricordare(oggi)
+        if da_dire:
+            self.messaggero.invia_messaggio(chat_id, modulo_compleanni.avviso(da_dire, oggi))
+        return len(da_dire)
 
     # --- Promemoria legati a un posto, e posti salvati -------------------------------------
 

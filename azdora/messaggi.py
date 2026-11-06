@@ -188,6 +188,7 @@ AIUTO = """👋 <b>Ciao, sono l'Azdora!</b> Mando avanti la casa. Scrivimi come 
 • <i>ricordami domani alle 18 di chiamare il meccanico</i> → te lo ricordo
 • <i>ricordami ogni lunedì alle 20 di portare fuori la plastica</i> → ogni settimana
 • <i>ricordami di comprare il pane quando arrivo a Rimini</i> → quando ci arrivi
+• <i>ricordami il compleanno della mamma il 14/3</i> → ogni anno, anche una settimana prima
 • 📍 mandami la posizione → meteo, notizie e allerte di dove sei
 
 🌤️ <b>Meteo</b>
@@ -213,6 +214,7 @@ AIUTO = """👋 <b>Ciao, sono l'Azdora!</b> Mando avanti la casa. Scrivimi come 
 /conti · /pareggio – nel gruppo: chi deve quanto a chi
 /rifiuti – raccolta differenziata, avviso la sera prima
 /promemoria – i tuoi promemoria · /sera – riepilogo della sera
+/compleanni – i compleanni segnati, dal più vicino
 /posto lavoro – salva dove sei, per <i>«ricordami… quando arrivo al lavoro»</i>
 /orari – quando ti scrivo (mattino, sera, notizie, silenzio)
 /telefono – posizione automatica dal telefono · /stato – come sto

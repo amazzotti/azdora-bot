@@ -28,6 +28,7 @@ Non serve ricordarsi i comandi:
 | `45 benzina` · `ho speso 12,50 per la pizza` · `pagato 80€ di bolletta luce` | segna la spesa, indovina la categoria e mostra i pulsanti **🏷️ Cambia categoria** e **↩️ Annulla**. Se correggi una categoria, la volta dopo la sceglie da sola |
 | `ricordami domani alle 18 di chiamare il meccanico` · `ricordami tra 2 ore…` · `ricordami venerdì…` | crea un promemoria e te lo manda all'ora giusta, con i pulsanti **⏰ +1 ora**, **📅 Domani** e **✅ Fatto** |
 | `ricordami ogni lunedì alle 20 di portare fuori la plastica` · `ogni sera…` · `ogni mese il 5…` · `ogni anno il 14/2…` | promemoria **ricorrenti** |
+| `ricordami il compleanno della mamma il 14/3` · `compleanno di Giulia 2 maggio 1995` | **compleanni**: avviso una settimana prima (per il regalo), il giorno prima e il giorno stesso, ogni anno; con l'anno di nascita dice quanti anni compie |
 | `ricordami di comprare il pane quando arrivo a Rimini` · `quando torno a casa ricordami di…` · `…quando arrivo al lavoro` | promemoria **legati a un posto**: scatta quando ci arrivi (paesi, casa o posti salvati con `/posto`) |
 | 📍 la tua posizione | ti dà meteo, vento, mare e consigli di quel punto, e da lì in poi segue te |
 
@@ -63,6 +64,7 @@ Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `s
 | `/budget 800` · `/budget auto 150` | Budget mensile, totale o per categoria. Sotto ogni spesa vedi a che punto sei, con ⚠️ all'80% e 🚨 quando lo superi |
 | `/conti` · `/pareggio` | **Nel gruppo**: ogni spesa ricorda chi l'ha pagata. `/conti` dice chi deve quanto a chi (spese divise in parti uguali, con il minor numero di passaggi); `/pareggio` riparte da zero |
 | `/promemoria` · `/ricordami …` | I promemoria in arrivo (anche quelli legati a un posto), con 🗑 per cancellarli |
+| `/compleanni` · `/compleanno Giulia 2/5/1995` | I compleanni segnati, dal più vicino, con 🗑 per toglierli. Nel gruppo valgono per il gruppo (e lì si segnano solo con «ricordami…» o con il comando, così le chiacchiere non diventano compleanni) |
 | `/posto lavoro` · `/posto` · `/posto lavoro off` | Salva dove sei adesso con un nome (casa, lavoro, mamma, palestra…), per i promemoria «quando arrivo al lavoro». Il promemoria scatta quando *entri* nel posto: se ci sei già, aspetta che esci e rientri. Serve la posizione automatica (`/telefono`, anche con l'automazione *Arrivo* di Comandi Rapidi) o quella in tempo reale |
 | `/rifiuti martedì plastica, carta` | Il calendario della raccolta differenziata: la sera prima, verso le 20, ti dice cosa portare fuori |
 | `/sera` | Attiva o spegne il **riepilogo delle 20**: meteo di domani, promemoria e scadenze del giorno dopo |
@@ -368,6 +370,7 @@ azdora-bot/
   - bill and car-tax reminders with a "Paid" button (recurring deadlines roll forward and become expenses);
   - monthly expenses with automatic categories, monthly reports and CSV export;
   - a shared checklist for couples that can live pinned at the top of the chat and update itself, and weekend ideas (weather-aware day trips and local festivals);
+  - birthday reminders a week before, the day before and on the day, with age;
   - location-based reminders ("remind me to buy bread when I get to Rimini") triggered by the phone's automatic location;
   - plain-language input: "45 fuel" or "remind me tomorrow at 6pm to call the mechanic" (in Italian), with rule-based parsing and no paid AI;
   - categories that learn from your corrections, monthly budgets with alerts, and Splitwise-style balances in group chats;

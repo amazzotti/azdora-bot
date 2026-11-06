@@ -105,6 +105,14 @@ COMANDI_DA_PROVARE = [
     "/spese",
     "/lista",
     "/promemoria",
+    "/compleanni",
+    "/compleanno mamma 14/3/1966",
+    "/posto",
+    "/posto lavoro",
+    "/lista fissa",
+    "/stato",
+    "ricordami di comprare il pane quando arrivo a casa",
+    "ricordami il compleanno di <b>Giulia</b> il 2 maggio",
 ]
 
 
