@@ -227,6 +227,7 @@ def leggi_xmltv(contenuto: bytes) -> list[Programma]:
         per_identificativo.setdefault(identificativo, []).append(
             Programma(canale, inizio, fine, pulisci_titolo(titolo)[:120], generi[:3], trama)
         )
+
     # Alcune guide hanno lo stesso canale due volte ("Rai.1.HD..101" e "Rai1"): si tiene
     # l'elenco più completo (prima chi ha i generi, utili per trovare i film), altrimenti
     # ogni programma comparirebbe due volte.
