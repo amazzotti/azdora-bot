@@ -45,7 +45,16 @@ _TRA = re.compile(
     r"mezz['’]?ora)\s*(?P<unita>minut[oi]|or[ae]|giorn[oi]|settiman[ae])?\b",
     re.IGNORECASE,
 )
-_ALLE = re.compile(r"\b(?:alle|all['’]|ore)\s*(?P<h>\d{1,2})(?:[:.](?P<m>\d{2}))?\b", re.IGNORECASE)
+_ALLE = re.compile(
+    r"\b(?:alle|all['’]|ore)\s*(?P<h>\d{1,2})"
+    # "alle 9:45", "alle 9.45", ma anche come si dice: "alle 9 e 45", "alle 9 e mezza"
+    r"(?:[:.](?P<m>\d{2})|\s+e\s+(?P<parlato>\d{1,2}|mezz[ao]|un\s+quarto|tre\s+quarti)\b)?\b",
+    re.IGNORECASE,
+)
+_MINUTI_PARLATI = {"mezza": 30, "mezzo": 30, "un quarto": 15, "tre quarti": 45}
+# La sveglia passa ogni 15 minuti, a volte qualche secondo prima dell'ora esatta: con un
+# piccolo anticipo il promemoria delle 9:45 arriva alle 9:45 e non alle 10:00.
+ANTICIPO = timedelta(minutes=3)
 _DATA = re.compile(r"\b(?:il\s+)?(?P<g>\d{1,2})[/.-](?P<mese>\d{1,2})(?:[/.-](?P<a>\d{2,4}))?\b")
 _GIORNO_PAROLA = re.compile(
     r"\b(?P<parola>oggi|domani|dopodomani|stasera|stanotte|stamattina|domattina|"
@@ -146,6 +155,9 @@ def leggi_promemoria(frase: str, adesso: datetime) -> tuple[datetime, str]:
         ora_esplicita: time | None = None
         if (alle := _ALLE.search(testo)) is not None:
             ore, minuti = int(alle["h"]), int(alle["m"] or 0)
+            if parlato := alle["parlato"]:
+                parlato = re.sub(r"\s+", " ", parlato.lower())
+                minuti = int(parlato) if parlato.isdigit() else _MINUTI_PARLATI[parlato]
             if ore > 23 or minuti > 59:
                 raise ErrorePromemoria("Quest'ora non esiste")
             ora_esplicita = time(ore, minuti)
@@ -247,14 +259,15 @@ class RegistroPromemoria:
         Quelli singoli vengono tolti; quelli ricorrenti si spostano alla volta successiva.
         """
         voci = self.tutti()
-        da_dire = [p for p in voci if p.quando <= adesso]
+        limite = adesso + ANTICIPO
+        da_dire = [p for p in voci if p.quando <= limite]
         if not da_dire:
             return []
-        rimasti = [p for p in voci if p.quando > adesso]
+        rimasti = [p for p in voci if p.quando > limite]
         for p in da_dire:
             if p.ripeti:
                 prossima = p.quando
-                while prossima <= adesso:
+                while prossima <= limite:
                     prossima = prossima_volta(prossima, p.ripeti)
                 rimasti.append(Promemoria(p.id, prossima, p.testo, p.ripeti))
         self._salva(rimasti)

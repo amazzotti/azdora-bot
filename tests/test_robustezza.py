@@ -3,6 +3,8 @@ un giornale con un feed strano, il meteo giù alle 7, il cambio dell'ora legale.
 
 from datetime import datetime, time, timedelta
 
+import pytest
+
 from azdora.archivio import ArchivioMemoria
 from azdora.bot import Azdora
 from azdora.config import FUSO_ORARIO, Impostazioni
@@ -208,3 +210,31 @@ def test_nome_con_caratteri_html_non_rompe_il_riepilogo():
 
     adesso = datetime(2026, 11, 6, 7, 0, tzinfo=FUSO_ORARIO)
     assert "Ale &lt;3" in riepilogo_oggi([], adesso, "Ale <3")
+
+
+@pytest.mark.parametrize(
+    ("frase", "ora", "minuti", "cosa"),
+    [
+        ("ricordami alle 9 e 45 di chiamare", 9, 45, "chiamare"),
+        ("ricordami alle 9.45 di chiamare", 9, 45, "chiamare"),
+        ("ricordami alle 18 e mezza di uscire", 18, 30, "uscire"),
+        ("ricordami alle 8 e un quarto di partire", 8, 15, "partire"),
+        ("ricordami alle 10 e tre quarti del caffè", 10, 45, "del caffè"),
+    ],
+)
+def test_ore_dette_a_voce(frase, ora, minuti, cosa):
+    from azdora.promemoria import leggi_ricorrente
+
+    adesso = datetime(2026, 11, 6, 7, 0, tzinfo=FUSO_ORARIO)
+    quando, testo, _ = leggi_ricorrente(frase, adesso)
+    assert (quando.date(), quando.hour, quando.minute, testo) == (adesso.date(), ora, minuti, cosa)
+
+
+def test_sveglia_qualche_secondo_prima_consegna_lo_stesso():
+    ora = Orologio(datetime(2026, 11, 6, 9, 44, 58, tzinfo=FUSO_ORARIO))
+    archivio, _, bot = crea(ora)
+    RegistroPromemoria(archivio, IO).aggiungi(datetime(2026, 11, 6, 9, 45, tzinfo=FUSO_ORARIO), "x")
+    assert bot.controlla_promemoria() == 1
+    # ma non uno di un quarto d'ora dopo
+    RegistroPromemoria(archivio, IO).aggiungi(datetime(2026, 11, 6, 10, 0, tzinfo=FUSO_ORARIO), "y")
+    assert bot.controlla_promemoria() == 0
