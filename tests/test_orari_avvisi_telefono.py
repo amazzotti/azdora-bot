@@ -151,6 +151,20 @@ def test_se_piove_gia_niente_avviso_pioggia():
     assert valuta(quarti(pioggia=[0.5, 0.5, 0.5]), "Riccione", alle(15)) == []
 
 
+def test_grandine_detta_chiaramente():
+    (avviso,) = valuta(quarti(codici=[2, 2, 95, 96]), "Riccione", alle(15))
+    assert avviso.tipo == "temporale" and "grandine" in avviso.testo
+    (senza,) = valuta(quarti(codici=[2, 95]), "Riccione", alle(15))
+    assert "grandine" not in senza.testo
+
+
+def test_acquazzone_mentre_piove_gia():
+    (avviso,) = valuta(quarti(pioggia=[0.3, 0.4, 2.5, 3.0]), "Riccione", alle(15))
+    assert avviso.tipo == "pioggia_forte" and "10 mm all'ora" in avviso.testo
+    assert "tra circa 30 minuti" in avviso.testo
+    assert valuta(quarti(pioggia=[2.5, 2.5, 2.5]), "Riccione", alle(15)) == []  # è già forte
+
+
 def test_temporale_neve_raffiche():
     avvisi = valuta(quarti(codici=[2, 2, 2, 2, 95], raffiche=[10, 20, 70]), "Rimini", alle(15))
     tipi = [a.tipo for a in avvisi]

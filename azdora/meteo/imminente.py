@@ -20,6 +20,8 @@ URL = "https://api.open-meteo.com/v1/forecast"
 QUARTI_AVANTI = 8  # 2 ore
 PIOGGIA_MINIMA = 0.2  # mm in 15 minuti
 RAFFICHE_FORTI = 60  # km/h
+PIOGGIA_FORTE = 2.0  # mm in 15 minuti, cioè circa 8 mm all'ora: un acquazzone
+CODICI_GRANDINE = frozenset({96, 99})
 
 
 @dataclass(frozen=True)
@@ -32,7 +34,7 @@ class Quarto:
 
 @dataclass(frozen=True)
 class Avviso:
-    tipo: str  # pioggia, temporale, neve, raffiche
+    tipo: str  # pioggia, pioggia_forte, temporale, neve, raffiche
     testo: str
 
 
@@ -82,11 +84,17 @@ def valuta(quarti: list[Quarto], posto: str, adesso: datetime) -> list[Avviso]:
     avvisi: list[Avviso] = []
 
     if (t := next((q for q in prossimi if q.codice in CODICI_TEMPORALE), None)) is not None:
+        grandine = any(q.codice in CODICI_GRANDINE for q in prossimi)
         avvisi.append(
             Avviso(
                 "temporale",
-                f"⛈️ <b>Temporale in arrivo</b> a {posto} {_quando(adesso, t.ora)}. "
-                "Se sei fuori, cerca un riparo.",
+                (
+                    f"⛈️🧊 <b>Temporale con grandine</b> a {posto} {_quando(adesso, t.ora)}. "
+                    "Metti al riparo la macchina e cerca un riparo."
+                    if grandine
+                    else f"⛈️ <b>Temporale in arrivo</b> a {posto} {_quando(adesso, t.ora)}. "
+                    "Se sei fuori, cerca un riparo."
+                ),
             )
         )
     if (n := next((q for q in prossimi if q.codice in CODICI_NEVE), None)) is not None:
@@ -105,6 +113,18 @@ def valuta(quarti: list[Quarto], posto: str, adesso: datetime) -> list[Avviso]:
                     f"☔ <b>Sta per piovere</b> a {posto}: {_quando(adesso, inizio.ora)}, "
                     f"pioggia {intensita} (circa {millimetri} mm nelle prossime 2 ore). "
                     "Ombrello!",
+                )
+            )
+    elif piove_ora and not any(a.tipo == "temporale" for a in avvisi):
+        # Piove già: si avvisa solo se sta per arrivare un acquazzone.
+        forte = next((q for q in prossimi if (q.pioggia or 0) >= PIOGGIA_FORTE), None)
+        if forte is not None and (ora_attuale.pioggia or 0) < PIOGGIA_FORTE:
+            millimetri = f"{(forte.pioggia or 0) * 4:.0f}"
+            avvisi.append(
+                Avviso(
+                    "pioggia_forte",
+                    f"🌧️ <b>Pioggia forte in arrivo</b> a {posto} {_quando(adesso, forte.ora)} "
+                    f"(circa {millimetri} mm all'ora). Occhio ai sottopassi.",
                 )
             )
     raffiche = [q.raffiche for q in prossimi if q.raffiche is not None]

@@ -361,3 +361,37 @@ def test_ricerca_google_tiene_solo_il_posto_cercato():
     with httpx.Client() as http:
         notizie = LettoreNotizie(http, []).notizie_per("Milano Marittima", 45.46, 9.19, ADESSO)
     assert [n.link for n in notizie] == ["https://a/1"]
+
+
+def test_ricerca_dedicata_a_riccione_e_misano():
+    from azdora.notizie import FONTI_ZONA
+
+    dedicate = [f for f in FONTI_ZONA if "Riccione" in f.solo_su]
+    assert len(dedicate) == 1 and "Riccione" in dedicate[0].url
+    assert dedicate[0].area == "Rimini"
+
+
+def test_universita_cattolica_non_e_cattolica():
+    from datetime import datetime
+
+    from azdora.notizie import Notizia, citta_di, parla_di
+
+    adesso = datetime(2026, 11, 6, 9, 0)
+    ateneo = Notizia(
+        "Gli studenti dell'Università Cattolica a convegno", "https://x/1", "X", adesso
+    )
+    paese = Notizia("Cattolica, nuovo lungomare", "https://x/2", "X", adesso)
+    assert not parla_di(ateneo, "Cattolica") and parla_di(paese, "Cattolica")
+    assert citta_di(paese) == "Cattolica" and citta_di(ateneo) != "Cattolica"
+
+
+def test_schede_e_tabellini_sportivi_scartati():
+    from datetime import datetime
+
+    from azdora.notizie import Notizia, e_spazzatura
+
+    adesso = datetime(2026, 11, 6, 9, 0)
+    assert e_spazzatura(
+        Notizia("Scheda giocatore Rossi Mario", "https://x/1", "Tuttocampo", adesso)
+    )
+    assert not e_spazzatura(Notizia("Riccione, nuovo ponte", "https://x/2", "Altarimini", adesso))

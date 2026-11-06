@@ -94,6 +94,14 @@ FONTI_ZONA: tuple[Fonte, ...] = (
     Fonte("Chiamami Città", "https://www.chiamamicitta.it/feed/", "Rimini"),
     Fonte("il Resto del Carlino Rimini", "https://www.ilrestodelcarlino.it/rimini/rss", "Rimini"),
     Fonte("NewsRimini", url_google_news_sito("newsrimini.it"), "Rimini"),
+    # Riccione e Misano sono nei giornali di Rimini ma con poche notizie: una ricerca
+    # dedicata raccoglie anche Comune, Corriere Romagna e gli altri siti.
+    Fonte(
+        "Google News",
+        url_google_news_posti("Riccione", "Misano Adriatico"),
+        "Rimini",
+        ("Riccione", "Misano"),
+    ),
     # Pesaro, Gabicce e dintorni
     Fonte("il Resto del Carlino Pesaro", "https://www.ilrestodelcarlino.it/pesaro/rss", "Pesaro"),
     Fonte("Pesaro Notizie", "https://www.pesaronotizie.com/feed/", "Pesaro"),
@@ -144,7 +152,10 @@ NOTIZIE_DEL_GIORNO = 10
 MASSIMO_SUL_COMUNE = 4
 MINIMO_NOTIZIE_GIORNO = 5
 # Google News a volte pesca siti di scommesse e simili: non sono notizie.
-_SPAZZATURA = re.compile(r"scommess|pronostic|betting|casin[oò]|zazoom|howl\.link", re.IGNORECASE)
+_SPAZZATURA = re.compile(
+    r"scommess|pronostic|betting|casin[oò]|zazoom|howl\.link|scheda giocatore|tabellino",
+    re.IGNORECASE,
+)
 _PAGINA_ELENCO = re.compile(
     r"^(notizie su|ultim['’]ora|ultime notizie|tutte le notizie|news su)(\s|$)", re.IGNORECASE
 )
@@ -232,7 +243,21 @@ def parla_di(notizia: Notizia, comune: str) -> bool:
     schema = re.compile(rf"\b{re.escape(comune)}\b", re.IGNORECASE)
     if any(c.lower() == comune.lower() for c in notizia.categorie):
         return True
-    return bool(schema.search(notizia.titolo) or schema.search(notizia.sommario))
+    return bool(
+        schema.search(senza_omonimi(notizia.titolo))
+        or schema.search(senza_omonimi(notizia.sommario))
+    )
+
+
+# Nomi uguali a quelli dei paesi ma che non c'entrano: l'Università Cattolica non è Cattolica.
+_OMONIMI = re.compile(
+    r"\buniversit\S*\s+cattolica\b|\bcattolica\s+del\s+sacro\s+cuore\b|\bchiesa\s+cattolica\b",
+    re.IGNORECASE,
+)
+
+
+def senza_omonimi(testo: str) -> str:
+    return _OMONIMI.sub(" ", testo)
 
 
 def recenti(notizie: Iterable[Notizia], adesso: datetime) -> list[Notizia]:
@@ -549,6 +574,7 @@ def citta_di(notizia: Notizia) -> str:
     """La città di cui parla una notizia: quella nominata per prima nel titolo, poi nel
     sommario, nelle etichette o nel nome del giornale; altrimenti la zona del giornale."""
     for testo in (notizia.titolo, notizia.sommario, " ".join(notizia.categorie), notizia.fonte):
+        testo = senza_omonimi(testo)
         trovate = [
             (m.start(), nome) for nome, schema in _SCHEMI_CITTA if (m := schema.search(testo))
         ]
