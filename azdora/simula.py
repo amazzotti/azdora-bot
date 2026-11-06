@@ -91,6 +91,16 @@ class Console:
     def esci_da_chat(self, chat_id: int) -> None:
         print(f"(il bot esce dalla chat {chat_id})")
 
+    def invia_e_fissa(
+        self, chat_id: int, testo: str, tastiera: dict[str, Any] | None = None
+    ) -> tuple[int, bool]:
+        self.invia_messaggio(chat_id, testo, tastiera)
+        print("(📌 messaggio fissato in alto nella chat)")
+        return 1, True
+
+    def sgancia(self, chat_id: int, id_messaggio: int) -> None:
+        print("(📌 messaggio sganciato)")
+
     def rispondi_pulsante(self, id_pulsante: str, testo: str | None = None) -> None:
         if testo:
             print(f"(avviso: {testo})")

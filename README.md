@@ -28,6 +28,7 @@ Non serve ricordarsi i comandi:
 | `45 benzina` · `ho speso 12,50 per la pizza` · `pagato 80€ di bolletta luce` | segna la spesa, indovina la categoria e mostra i pulsanti **🏷️ Cambia categoria** e **↩️ Annulla**. Se correggi una categoria, la volta dopo la sceglie da sola |
 | `ricordami domani alle 18 di chiamare il meccanico` · `ricordami tra 2 ore…` · `ricordami venerdì…` | crea un promemoria e te lo manda all'ora giusta, con i pulsanti **⏰ +1 ora**, **📅 Domani** e **✅ Fatto** |
 | `ricordami ogni lunedì alle 20 di portare fuori la plastica` · `ogni sera…` · `ogni mese il 5…` · `ogni anno il 14/2…` | promemoria **ricorrenti** |
+| `ricordami di comprare il pane quando arrivo a Rimini` · `quando torno a casa ricordami di…` · `…quando arrivo al lavoro` | promemoria **legati a un posto**: scatta quando ci arrivi (paesi, casa o posti salvati con `/posto`) |
 | 📍 la tua posizione | ti dà meteo, vento, mare e consigli di quel punto, e da lì in poi segue te |
 
 Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `spesa` (o `+`) e `ricordami`: `spesa 60 conad`, `+12 pizza`.
@@ -53,6 +54,7 @@ Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `s
 | `/mese [mese]` · `/spese` · `/annulla` | Riepilogo del mese per categoria con il confronto col mese prima · ultime spese · togli l'ultima |
 | `/esporta [anno]` | Il file CSV delle spese dell'anno, pronto per Excel |
 | `/aggiungi latte, pane` · `/lista` · `/svuota` | La lista condivisa: si spunta toccando le voci. Nel gruppo di coppia mostra chi ha aggiunto cosa |
+| `/lista fissa` · `/lista sgancia` | **Fissa la lista in alto nella chat**: si aggiorna da sola quando qualcuno aggiunge o spunta qualcosa, e in chat arriva solo una conferma corta. Nei gruppi serve il permesso di fissare i messaggi (o la fissi tu a mano: si aggiorna lo stesso) |
 | `/weekend` | Meteo di sabato e domenica, tre idee per un giro (al coperto se piove) e le sagre ed eventi della settimana |
 | `/sagre` | **Sagre, fiere e feste da Cervia a Pesaro**: il calendario delle feste di sempre del prossimo mese (Fiera dei Becchi a Santarcangelo, Il Pesce fa Festa a Cesenatico, Sapore di Sale a Cervia, Tartufo a Sant'Agata, Presepe della Marineria…) e quelle trovate nei giornali delle ultime due settimane |
 | `/costa` · `/costa domani` | **Tutta la costa in un messaggio**: Cervia e Milano Marittima, Cesenatico, Bellaria, Rimini, Riccione, Cattolica e Gabicce, Pesaro, con tempo, vento e mare |
@@ -60,7 +62,8 @@ Nei gruppi, dove la gente chiacchiera, capisce solo le frasi che iniziano con `s
 | `/telefono` | Ti dà una chiave personale per far mandare la **posizione in automatico** dal telefono (Comandi Rapidi su iPhone, HTTP Shortcuts o Tasker su Android), con le istruzioni passo passo. `/telefono off` la disattiva |
 | `/budget 800` · `/budget auto 150` | Budget mensile, totale o per categoria. Sotto ogni spesa vedi a che punto sei, con ⚠️ all'80% e 🚨 quando lo superi |
 | `/conti` · `/pareggio` | **Nel gruppo**: ogni spesa ricorda chi l'ha pagata. `/conti` dice chi deve quanto a chi (spese divise in parti uguali, con il minor numero di passaggi); `/pareggio` riparte da zero |
-| `/promemoria` · `/ricordami …` | I promemoria in arrivo, con 🗑 per cancellarli |
+| `/promemoria` · `/ricordami …` | I promemoria in arrivo (anche quelli legati a un posto), con 🗑 per cancellarli |
+| `/posto lavoro` · `/posto` · `/posto lavoro off` | Salva dove sei adesso con un nome (casa, lavoro, mamma, palestra…), per i promemoria «quando arrivo al lavoro». Il promemoria scatta quando *entri* nel posto: se ci sei già, aspetta che esci e rientri. Serve la posizione automatica (`/telefono`, anche con l'automazione *Arrivo* di Comandi Rapidi) o quella in tempo reale |
 | `/rifiuti martedì plastica, carta` | Il calendario della raccolta differenziata: la sera prima, verso le 20, ti dice cosa portare fuori |
 | `/sera` | Attiva o spegne il **riepilogo delle 20**: meteo di domani, promemoria e scadenze del giorno dopo |
 | `/aria [località]` | Indice UV con consiglio, qualità dell'aria e pollini (graminacee, betulla, olivo, ambrosia…). Nel riepilogo compaiono solo quando servono |
@@ -364,7 +367,8 @@ azdora-bot/
   - location-aware local news with links (local RSS feeds and Google News) and Meteoalarm weather alerts, pushed every 15 minutes without repeats;
   - bill and car-tax reminders with a "Paid" button (recurring deadlines roll forward and become expenses);
   - monthly expenses with automatic categories, monthly reports and CSV export;
-  - a shared checklist for couples and weekend ideas (weather-aware day trips and local festivals);
+  - a shared checklist for couples that can live pinned at the top of the chat and update itself, and weekend ideas (weather-aware day trips and local festivals);
+  - location-based reminders ("remind me to buy bread when I get to Rimini") triggered by the phone's automatic location;
   - plain-language input: "45 fuel" or "remind me tomorrow at 6pm to call the mechanic" (in Italian), with rule-based parsing and no paid AI;
   - categories that learn from your corrections, monthly budgets with alerts, and Splitwise-style balances in group chats;
   - waste-collection and evening reminders, UV/air quality/pollen, and the cheapest fuel nearby from Italian open data.

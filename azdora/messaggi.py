@@ -5,13 +5,16 @@ Qui c'è solo formattazione: nessuna chiamata di rete, quindi è tutto testabile
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime
 from html import escape
+from typing import Any
 
 from azdora.meteo.codici_wmo import condizione
 from azdora.meteo.mare import stato_mare
 from azdora.meteo.openmeteo import MareGiorno, MeteoGiorno, Previsioni, PrevisioniMare
 from azdora.meteo.vento import descrivi_vento, direzione_vento, punto_cardinale
+from azdora.posti import a_posto
 from azdora.soldi import euro
 
 GIORNI_BREVI = ("lun", "mar", "mer", "gio", "ven", "sab", "dom")
@@ -184,6 +187,7 @@ AIUTO = """👋 <b>Ciao, sono l'Azdora!</b> Mando avanti la casa. Scrivimi come 
 • <i>45 benzina</i> o <i>ho speso 12,50 per la pizza</i> → segno la spesa
 • <i>ricordami domani alle 18 di chiamare il meccanico</i> → te lo ricordo
 • <i>ricordami ogni lunedì alle 20 di portare fuori la plastica</i> → ogni settimana
+• <i>ricordami di comprare il pane quando arrivo a Rimini</i> → quando ci arrivi
 • 📍 mandami la posizione → meteo, notizie e allerte di dove sei
 
 🌤️ <b>Meteo</b>
@@ -205,9 +209,11 @@ AIUTO = """👋 <b>Ciao, sono l'Azdora!</b> Mando avanti la casa. Scrivimi come 
 
 🏠 <b>Casa e gruppo</b>
 /aggiungi latte, pane · /lista – la lista condivisa
+/lista fissa – la lista in alto nella chat, sempre aggiornata
 /conti · /pareggio – nel gruppo: chi deve quanto a chi
 /rifiuti – raccolta differenziata, avviso la sera prima
 /promemoria – i tuoi promemoria · /sera – riepilogo della sera
+/posto lavoro – salva dove sei, per <i>«ricordami… quando arrivo al lavoro»</i>
 /orari – quando ti scrivo (mattino, sera, notizie, silenzio)
 /telefono – posizione automatica dal telefono · /stato – come sto
 /weekend – meteo, gite e sagre · /sagre – feste da Cervia a Pesaro
@@ -353,6 +359,33 @@ def spesa_segnata(importo: int, categoria: str, descrizione: str, totale_mese: i
         f"✅ Segnata: <b>{euro(importo)}</b> · {escape(categoria)} · {escape(descrizione)}\n"
         f"Questo mese: {euro(totale_mese)}"
     )
+
+
+def aggiunte_alla_lista(testi: Sequence[str]) -> str:
+    cose = ", ".join(escape(t) for t in testi)
+    return f"✅ Aggiunto: {cose}. La lista è in alto 📌"
+
+
+FISSA_SENZA_PERMESSO = (
+    "📌 Ho mandato la lista ma non ho il permesso di fissarla in alto.\n"
+    "Fissala tu: tieni premuto il messaggio → <b>Fissa</b>. Si aggiornerà lo stesso.\n"
+    "Oppure rendimi amministratore del gruppo con il permesso <i>Fissare messaggi</i> "
+    "e riscrivi /lista fissa."
+)
+FISSA_NON_DISPONIBILE = "📌 Qui non posso fissare messaggi."
+LISTA_SGANCIATA = "📌 Ok, la lista non è più fissata. La trovi sempre con /lista."
+
+
+def posto_salvato(nome: str, posizione: Any) -> str:
+    dove = f" ({escape(posizione.etichetta)})" if getattr(posizione, "comune", None) else ""
+    return (
+        f"📌 Salvato «{escape(nome)}» qui{dove}.\n"
+        f"Ora puoi scrivere ad esempio: <i>ricordami di … quando arrivo {_articolo(nome)}</i>"
+    )
+
+
+def _articolo(nome: str) -> str:
+    return a_posto(nome)
 
 
 def lista_svuotata(quante: int) -> str:

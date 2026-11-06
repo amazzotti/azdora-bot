@@ -12,7 +12,7 @@ import hashlib
 import logging
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from datetime import time as dt_time
@@ -31,6 +31,7 @@ from azdora import lista as modulo_lista
 from azdora import messaggi
 from azdora import notizie as modulo_notizie
 from azdora import orari as modulo_orari
+from azdora import posti as modulo_posti
 from azdora import promemoria as modulo_promemoria
 from azdora import rifiuti as modulo_rifiuti
 from azdora import scadenze as modulo_scadenze
@@ -52,7 +53,7 @@ from azdora.config import (
 from azdora.conti import MembriGruppo, Pareggio, spese_da
 from azdora.linguaggio import leggi_spesa_libera
 from azdora.lista import Lista, leggi_voci
-from azdora.luoghi import CercaLuoghi, Luogo, distanza_km, localita_qui
+from azdora.luoghi import CercaLuoghi, ErroreLuoghi, Luogo, distanza_km, localita_qui
 from azdora.meteo.aria import FonteAria, avvisi_aria, messaggio_aria
 from azdora.meteo.imminente import FonteImminente, valuta
 from azdora.meteo.openmeteo import ErroreMeteo, FonteMeteo, PrevisioniMare
@@ -73,6 +74,7 @@ from azdora.posizione import (
     Posizione,
     Zona,
 )
+from azdora.posti import PostiSalvati, PromemoriaLuogo, RegistroLuoghi
 from azdora.promemoria import (
     ErrorePromemoria,
     RegistroPromemoria,
@@ -112,7 +114,7 @@ COMANDI: tuple[tuple[str, str], ...] = (
     ("spese", "Ultime spese segnate"),
     ("annulla", "Cancella l'ultima spesa segnata"),
     ("esporta", "Scarica le spese dell'anno in CSV"),
-    ("lista", "La lista condivisa delle cose da fare"),
+    ("lista", "La lista condivisa (/lista fissa: in alto nella chat)"),
     ("aggiungi", "Aggiungi alla lista: /aggiungi latte, pane"),
     ("weekend", "Meteo del weekend, gite e sagre"),
     ("sagre", "Sagre, fiere e feste da Cervia a Pesaro"),
@@ -125,6 +127,7 @@ COMANDI: tuple[tuple[str, str], ...] = (
     ("budget", "Budget mensile: /budget 800 o /budget auto 150"),
     ("conti", "Nel gruppo: chi deve quanto a chi"),
     ("pareggio", "Nel gruppo: siamo pari, si riparte da zero"),
+    ("posto", "Salva dove sei (casa, lavoro…) per i promemoria «quando arrivo»"),
     ("promemoria", "I tuoi promemoria"),
     ("ricordami", "Es. /ricordami domani alle 18 di chiamare"),
     ("rifiuti", "Raccolta differenziata, avviso la sera prima"),
@@ -263,6 +266,9 @@ class Azdora:
             "annulla": self._annulla,
             "esporta": self._esporta,
             "lista": self._lista,
+            "fissa": self._fissa_lista,
+            "posto": self._posto,
+            "posti": self._posto,
             "aggiungi": self._aggiungi,
             "svuota": self._svuota,
             "weekend": self._weekend,
@@ -456,6 +462,7 @@ class Azdora:
 
         in_tempo_reale = "live_period" in posizione
         self.posizioni.salva(chat.id, self._nuova_posizione(lat, lon, luogo, in_tempo_reale))
+        self._controlla_posti(chat.id, lat, lon)
         nota = messaggi.POSIZIONE_LIVE if in_tempo_reale else messaggi.POSIZIONE_RICORDATA
         testo = f"{testo}\n\n{nota}"
 
@@ -504,6 +511,7 @@ class Azdora:
             )
         nuova = self._nuova_posizione(lat, lon, luogo, True)
         self.posizioni.salva(chat_id, nuova)
+        self._controlla_posti(chat_id, lat, lon)
         return nuova
 
     def zona(self, chat_id: int | None = None) -> Zona:
@@ -875,6 +883,13 @@ class Azdora:
     # --- Lista condivisa --------------------------------------------------------------
 
     def _lista(self, chat: Chat, comando: Comando) -> None:
+        scelta = comando.testo_argomenti.strip().lower()
+        if scelta in {"fissa", "fissala", "in alto", "pin"}:
+            self._fissa_lista(chat, comando)
+            return
+        if scelta in {"sgancia", "stacca", "off", "togli"}:
+            self._sgancia_lista(chat)
+            return
         voci = Lista(self.archivio, chat.id).voci()
         self.messaggero.invia_messaggio(
             chat.id, modulo_lista.messaggio_lista(voci), modulo_lista.pulsanti_lista(voci)
@@ -888,13 +903,77 @@ class Azdora:
         lista = Lista(self.archivio, chat.id)
         lista.aggiungi(testi, comando.mittente if chat.e_un_gruppo else "")
         voci = lista.voci()
+        if self._aggiorna_lista_fissata(chat.id, voci):
+            # La lista è già lì in alto: basta una conferma corta, niente doppioni in chat.
+            self.messaggero.invia_messaggio(chat.id, messaggi.aggiunte_alla_lista(testi))
+            return
         self.messaggero.invia_messaggio(
             chat.id, modulo_lista.messaggio_lista(voci), modulo_lista.pulsanti_lista(voci)
         )
 
     def _svuota(self, chat: Chat, comando: Comando) -> None:
-        tolte = Lista(self.archivio, chat.id).togli_fatte()
+        lista = Lista(self.archivio, chat.id)
+        tolte = lista.togli_fatte()
+        self._aggiorna_lista_fissata(chat.id, lista.voci())
         self.messaggero.invia_messaggio(chat.id, messaggi.lista_svuotata(tolte))
+
+    def _fissa_lista(self, chat: Chat, comando: Comando) -> None:
+        """Mette la lista in un messaggio fissato in alto, che poi si aggiorna da solo."""
+        fissa = getattr(self.messaggero, "invia_e_fissa", None)
+        if fissa is None:
+            self.messaggero.invia_messaggio(chat.id, messaggi.FISSA_NON_DISPONIBILE)
+            return
+        voci = Lista(self.archivio, chat.id).voci()
+        vecchio = self.archivio.leggi(f"lista-fissata:{chat.id}")
+        if vecchio:
+            # Una lista fissata per volta: la vecchia si sgancia.
+            with contextlib.suppress(ErroreTelegram):
+                self.messaggero.sgancia(chat.id, int(vecchio))  # type: ignore[attr-defined]
+        id_messaggio, fissato = fissa(
+            chat.id,
+            modulo_lista.messaggio_lista(voci, fissata=True),
+            modulo_lista.pulsanti_lista(voci),
+        )
+        self.archivio.scrivi(f"lista-fissata:{chat.id}", id_messaggio)
+        if not fissato:
+            self.messaggero.invia_messaggio(chat.id, messaggi.FISSA_SENZA_PERMESSO)
+
+    def _sgancia_lista(self, chat: Chat) -> None:
+        vecchio = self.archivio.leggi(f"lista-fissata:{chat.id}")
+        self.archivio.cancella(f"lista-fissata:{chat.id}")
+        sgancia = getattr(self.messaggero, "sgancia", None)
+        if vecchio and sgancia is not None:
+            with contextlib.suppress(ErroreTelegram):
+                sgancia(chat.id, int(vecchio))
+        self.messaggero.invia_messaggio(chat.id, messaggi.LISTA_SGANCIATA)
+
+    def _aggiorna_lista_fissata(
+        self, chat_id: int, voci: Sequence[modulo_lista.Voce], gia_fatto: int | None = None
+    ) -> bool:
+        """Aggiorna la lista fissata in alto, se c'è. ``True`` se c'è (anche se era già giusta).
+
+        ``gia_fatto`` è il messaggio appena modificato (es. la lista fissata stessa, se la
+        spunta è stata fatta lì): non serve rifarlo.
+        """
+        id_fissata = self.archivio.leggi(f"lista-fissata:{chat_id}")
+        if not id_fissata:
+            return False
+        if int(id_fissata) == gia_fatto:
+            return True
+        try:
+            self.messaggero.modifica_messaggio(
+                chat_id,
+                int(id_fissata),
+                modulo_lista.messaggio_lista(voci, fissata=True),
+                modulo_lista.pulsanti_lista(voci) or {"inline_keyboard": []},
+            )
+        except ErroreTelegram as errore:
+            # Cancellata a mano dalla chat: si smette di aggiornarla.
+            log.warning("Lista fissata non aggiornata: %s", errore)
+            if "not found" in str(errore).lower():
+                self.archivio.cancella(f"lista-fissata:{chat_id}")
+                return False
+        return True
 
     # --- Weekend ----------------------------------------------------------------------
 
@@ -973,14 +1052,20 @@ class Azdora:
             elif valore == "pulisci":
                 lista.togli_fatte()
             voci = lista.voci()
+            id_fissata = self.archivio.leggi(f"lista-fissata:{chat_id}")
             if id_messaggio is not None:
                 self.messaggero.modifica_messaggio(
                     chat_id,
                     id_messaggio,
-                    modulo_lista.messaggio_lista(voci),
+                    modulo_lista.messaggio_lista(
+                        voci, fissata=bool(id_fissata) and int(id_fissata) == id_messaggio
+                    ),
                     modulo_lista.pulsanti_lista(voci) or {"inline_keyboard": []},
                 )
+            self._aggiorna_lista_fissata(chat_id, voci, gia_fatto=id_messaggio)
             return None
+        if azione in {"pldel", "plrip"}:
+            return self._pulsante_posto(chat_id, id_messaggio, azione, valore)
         return None
 
     def _persone(self) -> tuple[int, ...]:
@@ -1118,6 +1203,9 @@ class Azdora:
         Nei gruppi la gente chiacchiera: lì si capiscono solo le frasi che iniziano con
         "spesa" o "ricordami", per non scambiare un messaggio qualsiasi per una spesa.
         """
+        if (richiesta := modulo_posti.leggi_richiesta(testo)) is not None:
+            self._crea_promemoria_luogo(chat, richiesta, chi_id)
+            return
         if e_un_promemoria(testo):
             self._crea_promemoria(chat, testo)
             return
@@ -1216,15 +1304,134 @@ class Azdora:
         if not comando.argomenti:
             self.messaggero.invia_messaggio(chat.id, modulo_promemoria.USO)
             return
+        frase = f"ricordami {comando.testo_argomenti}"
+        if (richiesta := modulo_posti.leggi_richiesta(frase)) is not None:
+            self._crea_promemoria_luogo(chat, richiesta, comando.mittente_id)
+            return
         self._crea_promemoria(chat, comando.testo_argomenti)
 
     def _promemoria(self, chat: Chat, comando: Comando) -> None:
-        voci = RegistroPromemoria(self.archivio, chat.id).tutti()
-        self.messaggero.invia_messaggio(
-            chat.id,
-            modulo_promemoria.elenco(voci, self.orologio()),
-            modulo_promemoria.pulsanti(voci),
+        persona = comando.mittente_id or chat.id
+        self.messaggero.invia_messaggio(chat.id, *self._elenco_promemoria(chat.id, persona))
+
+    def _elenco_promemoria(self, chat_id: int, persona: int) -> tuple[str, dict[str, Any] | None]:
+        """I promemoria a orario della chat e quelli legati a un posto di chi chiede."""
+        voci = RegistroPromemoria(self.archivio, chat_id).tutti()
+        posti = [v for v in RegistroLuoghi(self.archivio, persona).tutti() if v.chat == chat_id]
+        testo = modulo_promemoria.elenco(voci, self.orologio())
+        if posti:
+            if not voci:
+                testo = "⏰ <b>I tuoi promemoria</b>"
+            testo += "\n" + "\n".join(modulo_posti.righe_elenco(posti))
+        righe = (modulo_promemoria.pulsanti(voci) or {}).get("inline_keyboard", [])
+        righe = [*righe, *modulo_posti.pulsanti_elenco(persona, posti)]
+        return testo, {"inline_keyboard": righe} if righe else None
+
+    # --- Promemoria legati a un posto, e posti salvati -------------------------------------
+
+    def _crea_promemoria_luogo(
+        self, chat: Chat, richiesta: modulo_posti.RichiestaLuogo, persona: int | None
+    ) -> None:
+        persona = persona or chat.id
+        trovato = self._trova_posto(persona, richiesta.posto)
+        if trovato is None:
+            self.messaggero.invia_messaggio(
+                chat.id, modulo_posti.NON_TROVATO.format(posto=escape(richiesta.posto))
+            )
+            return
+        nome, lat, lon, raggio = trovato
+        posizione = self.posizioni.leggi(persona)
+        adesso = self.orologio()
+        recente = posizione is not None and adesso - posizione.quando < timedelta(hours=2)
+        voce = PromemoriaLuogo(0, richiesta.cosa, nome, lat, lon, raggio, chat.id)
+        dentro = bool(recente and posizione and voce.contiene(posizione.lat, posizione.lon))
+        automatica = bool(
+            posizione and posizione.in_tempo_reale and adesso - posizione.quando < timedelta(days=1)
         )
+        try:
+            nuova = RegistroLuoghi(self.archivio, persona).aggiungi(replace(voce, dentro=dentro))
+        except ValueError as errore:
+            self.messaggero.invia_messaggio(chat.id, f"🤔 {escape(str(errore))}.")
+            return
+        self.messaggero.invia_messaggio(chat.id, modulo_posti.conferma(nuova, automatica))
+
+    def _trova_posto(self, persona: int, nome: str) -> tuple[str, float, float, float] | None:
+        """Un posto salvato (/posto), casa, o un paese: nome, coordinate e raggio."""
+        if salvato := PostiSalvati(self.archivio, persona).cerca(nome):
+            return salvato.nome, salvato.lat, salvato.lon, modulo_posti.RAGGIO_POSTO_KM
+        if modulo_posti.normalizza(nome) == "casa":
+            return "casa", ZONA_CASA.lat, ZONA_CASA.lon, modulo_posti.RAGGIO_CASA_STIMATA_KM
+        if self.luoghi is None:
+            return None
+        try:
+            localita = self.luoghi.cerca(nome)
+        except ErroreLuoghi as errore:
+            log.warning("Ricerca del posto %r non riuscita: %s", nome, errore)
+            return None
+        if localita is None:
+            return None
+        return localita.nome, localita.lat, localita.lon, modulo_posti.RAGGIO_PAESE_KM
+
+    def _controlla_posti(self, persona: int, lat: float, lon: float) -> int:
+        """Nuova posizione: manda i promemoria dei posti in cui la persona è appena arrivata."""
+        try:
+            scattati = RegistroLuoghi(self.archivio, persona).arrivato(lat, lon)
+        except ErroreArchivio as errore:
+            log.warning("Promemoria dei posti non controllati: %s", errore)
+            return 0
+        for voce in scattati:
+            try:
+                self.messaggero.invia_messaggio(
+                    voce.chat,
+                    modulo_posti.avviso(voce),
+                    modulo_posti.pulsanti_avviso(persona, voce),
+                )
+            except ErroreTelegram as errore:
+                log.warning("Promemoria del posto non consegnato: %s", errore)
+        return len(scattati)
+
+    def _pulsante_posto(
+        self, chat_id: int, id_messaggio: int | None, azione: str, valore: str
+    ) -> str | None:
+        persona_testo, _, id_testo = valore.partition(":")
+        persona, id_voce = int(persona_testo), int(id_testo)
+        registro = RegistroLuoghi(self.archivio, persona)
+        if azione == "plrip":
+            if registro.rimetti(id_voce) is None:
+                return "Era già attivo 👍"
+            return "🔁 Te lo ricordo anche la prossima volta che ci arrivi"
+        registro.elimina(id_voce)
+        if id_messaggio is not None:
+            self.messaggero.modifica_messaggio(
+                chat_id, id_messaggio, *self._elenco_promemoria(chat_id, persona)
+            )
+        return "🗑 Cancellato"
+
+    def _posto(self, chat: Chat, comando: Comando) -> None:
+        """``/posto lavoro``: salva dove sei adesso; ``/posto``: l'elenco; ``off`` lo toglie."""
+        persona = comando.mittente_id or chat.id
+        salvati = PostiSalvati(self.archivio, persona)
+        argomenti = [a.lower() for a in comando.argomenti]
+        if not argomenti:
+            self.messaggero.invia_messaggio(chat.id, modulo_posti.messaggio_posti(salvati.tutti()))
+            return
+        if argomenti[-1] in {"off", "togli", "cancella", "elimina"} and len(argomenti) > 1:
+            nome = " ".join(comando.argomenti[:-1])
+            tolto = salvati.togli(nome)
+            testo = f"🗑 Tolto «{escape(nome)}»." if tolto else f"Non avevo «{escape(nome)}»."
+            self.messaggero.invia_messaggio(chat.id, testo)
+            return
+        nome = comando.testo_argomenti
+        posizione = self.posizioni.leggi(persona)
+        if posizione is None or self.orologio() - posizione.quando > timedelta(hours=1):
+            self.messaggero.invia_messaggio(chat.id, modulo_posti.USO_POSTO)
+            return
+        try:
+            posto = salvati.salva(nome, posizione.lat, posizione.lon)
+        except ValueError as errore:
+            self.messaggero.invia_messaggio(chat.id, f"🤔 {escape(str(errore))}.")
+            return
+        self.messaggero.invia_messaggio(chat.id, messaggi.posto_salvato(posto.nome, posizione))
 
     def _rifiuti(self, chat: Chat, comando: Comando) -> None:
         calendario = Calendario(self.archivio, chat.id)

@@ -68,20 +68,24 @@ class Lista:
         return len(voci) - len(rimaste)
 
 
-def messaggio_lista(voci: Sequence[Voce]) -> str:
+def messaggio_lista(voci: Sequence[Voce], fissata: bool = False) -> str:
+    """La lista; ``fissata`` per il messaggio in alto nella chat, che si aggiorna da solo."""
+    icona = "📌" if fissata else "📝"
     if not voci:
         return (
-            "📝 La lista è vuota.\n"
+            f"{icona} La lista è vuota.\n"
             "Aggiungi qualcosa: <code>/aggiungi latte, pane, prenotare il ristorante</code>"
         )
     da_fare = sum(not v.fatta for v in voci)
-    righe = [f"📝 <b>Lista</b> · {da_fare} da fare su {len(voci)}", ""]
+    righe = [f"{icona} <b>Lista</b> · {da_fare} da fare su {len(voci)}", ""]
     for v in voci:
         segno = "✅" if v.fatta else "⬜"
         testo = f"<s>{escape(v.testo)}</s>" if v.fatta else escape(v.testo)
         chi = f" <i>({escape(v.da)})</i>" if v.da else ""
         righe.append(f"{segno} {testo}{chi}")
     righe += ["", "Tocca una voce per spuntarla."]
+    if fissata:
+        righe[-1] += " Si aggiorna da sola."
     return "\n".join(righe)
 
 

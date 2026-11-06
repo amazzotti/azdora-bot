@@ -157,6 +157,38 @@ class Telegram:
     def esci_da_chat(self, chat_id: int) -> None:
         self.chiama("leaveChat", chat_id=chat_id)
 
+    def invia_e_fissa(
+        self, chat_id: int, testo: str, tastiera: dict[str, Any] | None = None
+    ) -> tuple[int, bool]:
+        """Manda un messaggio e lo fissa in alto nella chat, senza notifica.
+
+        Restituisce l'id del messaggio e se è riuscita a fissarlo (nei gruppi serve il
+        permesso di fissare i messaggi).
+        """
+        parametri: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": dividi(testo)[0],
+            "parse_mode": "HTML",
+            "link_preview_options": {"is_disabled": True},
+        }
+        if tastiera is not None:
+            parametri["reply_markup"] = tastiera
+        risultato = self.chiama("sendMessage", **parametri)
+        id_messaggio = int(risultato["message_id"])
+        try:
+            self.chiama(
+                "pinChatMessage",
+                chat_id=chat_id,
+                message_id=id_messaggio,
+                disable_notification=True,
+            )
+        except ErroreTelegram:
+            return id_messaggio, False
+        return id_messaggio, True
+
+    def sgancia(self, chat_id: int, id_messaggio: int) -> None:
+        self.chiama("unpinChatMessage", chat_id=chat_id, message_id=id_messaggio)
+
     def rispondi_pulsante(self, id_pulsante: str, testo: str | None = None) -> None:
         parametri: dict[str, Any] = {"callback_query_id": id_pulsante}
         if testo:
